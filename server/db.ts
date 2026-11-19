@@ -3,6 +3,7 @@
  * DATABASE_URL không bao giờ được đưa vào bundle frontend.
  */
 import type { ExtractTablesWithRelations } from 'drizzle-orm';
+import { attachDatabasePool } from '@vercel/functions';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import pg from 'pg';
@@ -34,6 +35,8 @@ export function getDb(): Database {
     connectionTimeoutMillis: 8_000,
   });
   pool.on('error', (err) => console.error('[db] pool error', err.message));
+  // Vercel Fluid compute: đóng kết nối rảnh trước khi instance bị tạm dừng (khuyến nghị của Neon).
+  attachDatabasePool(pool);
   cached = drizzle(pool, { schema }) as unknown as Database;
   return cached;
 }

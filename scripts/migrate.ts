@@ -1,7 +1,8 @@
 /**
  * Chạy migration database.
  *   npm run db:migrate
- * - Có DATABASE_URL (.env.local / .env / biến môi trường) => migrate Neon/PostgreSQL.
+ * - Có DATABASE_URL_UNPOOLED / DATABASE_URL (.env.local / .env / biến môi trường) => migrate Neon/PostgreSQL.
+ *   Ưu tiên kết nối TRỰC TIẾP (DATABASE_URL_UNPOOLED) vì migration không nên đi qua PgBouncer.
  * - Không có => migrate database PGlite local tại .data/pglite.
  * Migration chỉ THÊM thay đổi, không xoá dữ liệu hiện có.
  */
@@ -17,7 +18,7 @@ config({ quiet: true });
 const migrationsFolder = join(import.meta.dirname, '..', 'db', 'migrations');
 
 async function main() {
-  const url = process.env.DATABASE_URL;
+  const url = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
   if (!url) {
     const { createPgliteDatabase, LOCAL_DATA_DIR } = await import('../dev/localDb.js');
     const { close } = await createPgliteDatabase(LOCAL_DATA_DIR);
