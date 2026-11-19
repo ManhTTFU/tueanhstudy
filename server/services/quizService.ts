@@ -39,6 +39,7 @@ export interface StartedSession {
 
 export async function startSession(
   db: Database,
+  familyId: string,
   chapterId: string,
   rng: Rng = Math.random,
   now = new Date(),
@@ -52,7 +53,7 @@ export async function startSession(
     const rows = await db
       .select({ chapterId: chapterProgress.chapterId, bestScore: chapterProgress.bestScore })
       .from(chapterProgress)
-      .where(inArray(chapterProgress.chapterId, required.map((c) => c.id)));
+      .where(and(eq(chapterProgress.familyId, familyId), inArray(chapterProgress.chapterId, required.map((c) => c.id))));
     const best = (id: string) => rows.find((r) => r.chapterId === id)?.bestScore ?? 0;
     if (!isChapterUnlocked(chapter, best)) {
       throw forbidden('level_locked', `Bé cần đạt ${LEVEL_UNLOCK_MIN_SCORE} điểm ở các trò cấp trước để mở cấp này`, {
@@ -64,7 +65,7 @@ export async function startSession(
   const [recent] = await db
     .select({ n: count() })
     .from(quizSessions)
-    .where(gt(quizSessions.startedAt, new Date(now.getTime() - 10 * 60 * 1000)));
+    .where(and(eq(quizSessions.familyId, familyId), gt(quizSessions.startedAt, new Date(now.getTime() - 10 * 60 * 1000))));
   if ((recent?.n ?? 0) >= MAX_SESSIONS_PER_10_MIN) throw tooManyRequests();
 
   // Dọn các phiên bỏ dở quá hạn để database luôn gọn nhẹ.
@@ -81,6 +82,7 @@ export async function startSession(
   const [row] = await db
     .insert(quizSessions)
     .values({
+      familyId,
       chapterId: chapter.id,
       chapterName: chapter.name,
       status: 'in_progress',
@@ -113,12 +115,17 @@ export interface CompletedSessionResult {
 
 export async function completeSession(
   db: Database,
+  familyId: string,
   sessionId: string,
   answers: SubmittedAnswer[],
   now = new Date(),
 ): Promise<CompletedSessionResult> {
   return db.transaction(async (tx) => {
-    const [session] = await tx.select().from(quizSessions).where(eq(quizSessions.id, sessionId)).for('update');
+    const [session] = await tx
+      .select()
+      .from(quizSessions)
+      .where(and(eq(quizSessions.id, sessionId), eq(quizSessions.familyId, familyId)))
+      .for('update');
     if (!session) throw notFound('Không tìm thấy phiên học');
 
     if (session.status === 'completed') {
@@ -152,11 +159,13 @@ export async function completeSession(
       })),
     );
 
-    const p = await ensureProgressRow(tx, true);
+    const p = await ensureProgressRow(tx, familyId, true);
     const [perfectBefore] = await tx
       .select({ n: count() })
       .from(quizSessions)
-      .where(and(eq(quizSessions.status, 'completed'), eq(quizSessions.isPerfectScore, true)));
+      .where(
+        and(eq(quizSessions.familyId, familyId), eq(quizSessions.status, 'completed'), eq(quizSessions.isPerfectScore, true)),
+      );
 
     const grants = computeSessionRewards({
       sessionId,
@@ -173,6 +182,7 @@ export async function completeSession(
           .insert(rewards)
           .values(
             grants.map((g) => ({
+              familyId,
               rewardType: g.rewardType,
               rewardCode: g.rewardCode,
               quantity: g.quantity,
@@ -181,7 +191,7 @@ export async function completeSession(
               earnedAt: now,
             })),
           )
-          .onConflictDoNothing({ target: rewards.dedupeKey })
+          .onConflictDoNothing({ target: [rewards.familyId, rewards.dedupeKey] })
           .returning({ dedupeKey: rewards.dedupeKey })
       : [];
     const insertedKeys = new Set(inserted.map((r) => r.dedupeKey));
@@ -210,12 +220,13 @@ export async function completeSession(
         totalIncorrectAnswers: sql`${progress.totalIncorrectAnswers} + ${score.incorrectAnswers}`,
         updatedAt: now,
       })
-      .where(eq(progress.id, 1))
+      .where(eq(progress.familyId, familyId))
       .returning();
 
     await tx
       .insert(chapterProgress)
       .values({
+        familyId,
         chapterId: chapter.id,
         totalSessions: 1,
         perfectSessions: score.isPerfectScore ? 1 : 0,
@@ -226,7 +237,7 @@ export async function completeSession(
         completedAt: now,
       })
       .onConflictDoUpdate({
-        target: chapterProgress.chapterId,
+        target: [chapterProgress.familyId, chapterProgress.chapterId],
         set: {
           totalSessions: sql`${chapterProgress.totalSessions} + 1`,
           perfectSessions: sql`${chapterProgress.perfectSessions} + ${score.isPerfectScore ? 1 : 0}`,
@@ -258,7 +269,7 @@ export async function completeSession(
 }
 
 async function buildExistingResult(db: Database, session: QuizSessionRow): Promise<CompletedSessionResult> {
-  const p = await ensureProgressRow(db);
+  const p = await ensureProgressRow(db, session.familyId);
   return {
     sessionId: session.id,
     chapterId: session.chapterId,

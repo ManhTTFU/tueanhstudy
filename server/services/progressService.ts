@@ -1,13 +1,14 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { chapterProgress, progress, rewards, type ChapterProgressRow, type ProgressRow } from '../../db/schema.js';
+import { isChapterIdUnlocked } from '../../src/chapters/levels.js';
 import { getEnabledChapters } from '../../src/chapters/registry.js';
 import { candiesUntilNextGift, giftsAvailable } from '../../src/engine/RewardService.js';
 import type { Database } from '../db.js';
 import { getPublicSettings, type PublicSettings } from './settingsService.js';
 
-export async function ensureProgressRow(db: Database, forUpdate = false): Promise<ProgressRow> {
-  await db.insert(progress).values({ id: 1 }).onConflictDoNothing();
-  const query = db.select().from(progress).where(eq(progress.id, 1));
+export async function ensureProgressRow(db: Database, familyId: string, forUpdate = false): Promise<ProgressRow> {
+  await db.insert(progress).values({ familyId }).onConflictDoNothing();
+  const query = db.select().from(progress).where(eq(progress.familyId, familyId));
   const rows = forUpdate ? await query.for('update') : await query;
   return rows[0]!;
 }
@@ -68,7 +69,7 @@ export function toChapterSummary(chapterId: string, row: ChapterProgressRow | un
   };
 }
 
-export async function getStickerCounts(db: Database): Promise<StickerCount[]> {
+export async function getStickerCounts(db: Database, familyId: string): Promise<StickerCount[]> {
   const rows = await db
     .select({
       code: rewards.rewardCode,
@@ -76,7 +77,7 @@ export async function getStickerCounts(db: Database): Promise<StickerCount[]> {
       firstEarnedAt: sql<string>`min(${rewards.earnedAt})`,
     })
     .from(rewards)
-    .where(eq(rewards.rewardType, 'sticker'))
+    .where(and(eq(rewards.familyId, familyId), eq(rewards.rewardType, 'sticker')))
     .groupBy(rewards.rewardCode);
   return rows.map((r) => ({
     code: r.code,
@@ -86,11 +87,11 @@ export async function getStickerCounts(db: Database): Promise<StickerCount[]> {
 }
 
 /** Dữ liệu cho trang chủ – vài truy vấn nhỏ, KHÔNG tải lịch sử. */
-export async function getSummary(db: Database): Promise<Summary> {
-  const p = await ensureProgressRow(db);
-  const chapterRows = await db.select().from(chapterProgress);
-  const stickers = await getStickerCounts(db);
-  const settings = await getPublicSettings(db);
+export async function getSummary(db: Database, familyId: string): Promise<Summary> {
+  const p = await ensureProgressRow(db, familyId);
+  const chapterRows = await db.select().from(chapterProgress).where(eq(chapterProgress.familyId, familyId));
+  const stickers = await getStickerCounts(db, familyId);
+  const settings = await getPublicSettings(db, familyId);
   const chapters = getEnabledChapters().map((c) =>
     toChapterSummary(
       c.id,
@@ -98,8 +99,12 @@ export async function getSummary(db: Database): Promise<Summary> {
       c.hasLearningStage,
     ),
   );
-  const maxStars = chapters.length * 3;
-  const stars = chapters.reduce((s, c) => s + c.stars, 0);
+  // Tiến độ tổng chỉ tính các trò ĐÃ MỞ KHOÁ: mở cấp mới thì mẫu số tăng dần,
+  // bé không bị "tụt" tiến độ vì những cấp chưa chơi tới.
+  const bestScoreOf = (id: string) => chapterRows.find((r) => r.chapterId === id)?.bestScore ?? 0;
+  const counted = chapters.filter((c) => isChapterIdUnlocked(c.chapterId, bestScoreOf));
+  const maxStars = counted.length * 3;
+  const stars = counted.reduce((s, c) => s + c.stars, 0);
   return {
     totals: {
       totalCandies: p.totalCandies,
@@ -118,13 +123,13 @@ export async function getSummary(db: Database): Promise<Summary> {
 }
 
 /** Ghi nhận bé đã xem hết thẻ học của chương (chỉ lưu lần đầu). */
-export async function markLearned(db: Database, chapterId: string): Promise<void> {
+export async function markLearned(db: Database, familyId: string, chapterId: string): Promise<void> {
   const now = new Date();
   await db
     .insert(chapterProgress)
-    .values({ chapterId, learnedAt: now })
+    .values({ familyId, chapterId, learnedAt: now })
     .onConflictDoUpdate({
-      target: chapterProgress.chapterId,
+      target: [chapterProgress.familyId, chapterProgress.chapterId],
       set: { learnedAt: sql`coalesce(${chapterProgress.learnedAt}, ${now})`, updatedAt: now },
     });
 }

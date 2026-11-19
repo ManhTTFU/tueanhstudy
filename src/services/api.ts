@@ -41,7 +41,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string; details?: unknown } } | null)?.error;
-    // Máy chưa nhập mã gia đình (hoặc mã vừa bị đổi) => báo cho FamilyGate hiện màn hình nhập mã.
+    // Máy chưa đăng nhập gia đình (hoặc mã vừa bị đổi) => báo cho FamilyGate hiện màn hình đăng nhập.
     if (res.status === 401 && err?.code === 'family_required') window.dispatchEvent(new Event(FAMILY_REQUIRED_EVENT));
     throw new ApiClientError(res.status, err?.code ?? 'error', err?.message ?? 'Có lỗi xảy ra', err?.details);
   }
@@ -53,7 +53,19 @@ export interface PublicSettings {
   soundEnabled: boolean;
   reducedMotion: boolean;
   pinConfigured: boolean;
-  familyCodeEnabled: boolean;
+  familyName: string;
+}
+
+export interface RegistrationInfo {
+  open: boolean;
+  inviteRequired: boolean;
+  full: boolean;
+}
+
+export interface FamilyStatus {
+  loggedIn: boolean;
+  family?: { name: string; hasCode: boolean };
+  registration: RegistrationInfo;
 }
 
 export interface StickerCount {
@@ -197,9 +209,13 @@ export const api = {
   rewards: () => request<RewardsOverview>('GET', 'rewards'),
   openGift: (giftId: string) => request<GiftResult>('POST', 'rewards/gifts/open', { giftId }),
 
-  familyStatus: () => request<{ enabled: boolean; unlocked: boolean }>('GET', 'family/status'),
-  familyUnlock: (code: string) => request<{ unlocked: true }>('POST', 'family/unlock', { code }),
-  setFamilyCode: (code: string | null) => request<{ enabled: boolean }>('PUT', 'family/code', { code }),
+  familyStatus: () => request<FamilyStatus>('GET', 'family/status'),
+  familyLogin: (body: { name: string; code?: string; pin?: string }) => request<{ loggedIn: true }>('POST', 'family/login', body),
+  familyRegister: (body: { name: string; code: string; pin: string; invite?: string }) =>
+    request<{ loggedIn: true }>('POST', 'family/register', body),
+  familyLogout: () => request<{ loggedIn: false }>('POST', 'family/logout'),
+  setFamilyCode: (code: string) => request<{ ok: true }>('PUT', 'family/code', { code }),
+  renameFamily: (name: string) => request<{ name: string }>('PUT', 'family/name', { name }),
   familyLogoutAll: () => request<{ ok: true }>('POST', 'family/logout-all'),
 
   parentSession: () => request<{ pinConfigured: boolean; authenticated: boolean }>('GET', 'parent/session'),

@@ -30,9 +30,10 @@ export interface HistoryPage {
 /** Lịch sử có phân trang – chỉ các bài đã hoàn thành. */
 export async function getHistory(
   db: Database,
+  familyId: string,
   { page, pageSize, chapterId }: { page: number; pageSize: number; chapterId?: string | undefined },
 ): Promise<HistoryPage> {
-  const conditions: SQL[] = [eq(quizSessions.status, 'completed')];
+  const conditions: SQL[] = [eq(quizSessions.familyId, familyId), eq(quizSessions.status, 'completed')];
   if (chapterId) conditions.push(eq(quizSessions.chapterId, chapterId));
   const where = and(...conditions);
   const [totalRow] = await db.select({ n: count() }).from(quizSessions).where(where);
@@ -69,8 +70,11 @@ export async function getHistory(
   };
 }
 
-export async function getSessionDetail(db: Database, sessionId: string) {
-  const [session] = await db.select().from(quizSessions).where(eq(quizSessions.id, sessionId));
+export async function getSessionDetail(db: Database, familyId: string, sessionId: string) {
+  const [session] = await db
+    .select()
+    .from(quizSessions)
+    .where(and(eq(quizSessions.id, sessionId), eq(quizSessions.familyId, familyId)));
   if (!session || session.status !== 'completed') throw notFound('Không tìm thấy bài học');
   const answers = await db
     .select()
@@ -118,10 +122,10 @@ export interface ParentStats {
   chapters: (ChapterSummary & { name: string; accuracy: number })[];
 }
 
-export async function getParentStats(db: Database): Promise<ParentStats> {
-  const p = await ensureProgressRow(db);
-  const rows = await db.select().from(chapterProgress);
-  const stickers = await getStickerCounts(db);
+export async function getParentStats(db: Database, familyId: string): Promise<ParentStats> {
+  const p = await ensureProgressRow(db, familyId);
+  const rows = await db.select().from(chapterProgress).where(eq(chapterProgress.familyId, familyId));
+  const stickers = await getStickerCounts(db, familyId);
   const answered = p.totalCorrectAnswers + p.totalIncorrectAnswers;
   // Cả chương đã tắt nhưng có dữ liệu cũng được hiển thị cho phụ huynh.
   const ids = new Set([...getEnabledChapters().map((c) => c.id), ...rows.map((r) => r.chapterId)]);

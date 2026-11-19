@@ -44,8 +44,24 @@ export const pinSchema = z.string().regex(/^\d{4,6}$/, 'Mã PIN gồm 4–6 ch�
 export const setupPinSchema = z.object({ pin: pinSchema });
 export const loginSchema = z.object({ pin: pinSchema });
 export const familyCodeSchema = z.string().regex(/^\d{4,8}$/, 'Mã gia đình gồm 4–8 chữ số');
-export const familyUnlockSchema = z.object({ code: familyCodeSchema });
-export const setFamilyCodeSchema = z.object({ code: familyCodeSchema.nullable() });
+export const familyNameSchema = z
+  .string()
+  .trim()
+  .min(2, 'Tên gia đình cần ít nhất 2 ký tự')
+  .max(40, 'Tên gia đình tối đa 40 ký tự')
+  .regex(/[\p{L}\p{N}]/u, 'Tên gia đình cần có chữ hoặc số');
+/** Đăng nhập gia đình: tên + (mã gia đình HOẶC PIN phụ huynh). */
+export const familyLoginSchema = z
+  .object({ name: z.string().trim().min(1).max(40), code: familyCodeSchema.optional(), pin: pinSchema.optional() })
+  .refine((v) => (v.code === undefined) !== (v.pin === undefined) || (v.code === undefined && v.pin === undefined), 'Chỉ nhập mã gia đình hoặc PIN');
+export const familyRegisterSchema = z.object({
+  name: familyNameSchema,
+  code: familyCodeSchema,
+  pin: pinSchema.optional(),
+  invite: z.string().trim().max(100).optional(),
+});
+export const setFamilyCodeSchema = z.object({ code: familyCodeSchema });
+export const renameFamilySchema = z.object({ name: familyNameSchema });
 export const changePinSchema = z.object({ currentPin: pinSchema, newPin: pinSchema });
 
 export const settingsSchema = z

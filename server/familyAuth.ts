@@ -1,111 +1,163 @@
 /**
- * Mã gia đình – khoá cả ứng dụng với người ngoài (bé không cần đăng nhập).
- *  - Chưa đặt mã (family_code_hash = NULL) => ứng dụng mở như trước.
- *  - Đã đặt mã => mọi API (trừ vài API mở khoá/phụ huynh) cần cookie `bvht_family`.
- *    Máy nhập đúng mã được nhớ 1 năm (cookie HttpOnly, token ký HMAC).
- *  - Mã được băm bằng scrypt; sai 5 lần => khoá 5 phút (lưu trong database).
+ * Gia đình – mỗi gia đình là một tài khoản riêng, dữ liệu học tập tách biệt.
+ *  - Đăng nhập trên máy mới bằng TÊN GIA ĐÌNH + MÃ GIA ĐÌNH (hoặc + PIN phụ huynh
+ *    khi quên mã). Máy được nhớ 1 năm (cookie `bvht_family`, HttpOnly, ký HMAC).
+ *  - Tạo gia đình mới cần MÃ MỜI (biến môi trường FAMILY_INVITE_CODE), tối đa
+ *    MAX_FAMILIES gia đình (mặc định 10). Gia đình đầu tiên của hệ thống tạo tự do.
+ *  - Mã gia đình băm scrypt; sai 5 lần => khoá 5 phút (lưu trong database).
  *  - Đổi mã / "đăng xuất mọi máy" => tăng family_version, cookie cũ hết hiệu lực.
- *  - Phụ huynh đăng nhập bằng PIN cũng nhận cookie gia đình (để khôi phục khi quên mã).
  */
 import { timingSafeEqual } from 'node:crypto';
-import { eq, sql } from 'drizzle-orm';
-import { appSettings, type AppSettingsRow } from '../db/schema.js';
-import { getSecret, hashPin, MAX_PIN_ATTEMPTS, PIN_LOCK_MS, sign, verifyPin } from './auth.js';
+import { count, eq, sql } from 'drizzle-orm';
+import { families, progress } from '../db/schema.js';
+import { checkPinWithLockout, hashPin, MAX_PIN_ATTEMPTS, PIN_LOCK_MS, readToken, signToken, verifyPin } from './auth.js';
 import type { Database } from './db.js';
-import { ApiError } from './errors.js';
-import { getSettingsRow } from './services/settingsService.js';
+import { ApiError, conflict } from './errors.js';
+import { getFamilyRow } from './services/settingsService.js';
 
 export const FAMILY_COOKIE = 'bvht_family';
 export const FAMILY_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+export const DEFAULT_MAX_FAMILIES = 10;
 
-/** Tách miền chữ ký: token gia đình không thể dùng làm token phụ huynh và ngược lại. */
-const familySign = (payload: string, secret: string) => sign(`family:${payload}`, secret);
-
-export function isFamilyCodeEnabled(row: AppSettingsRow): boolean {
-  return row.familyCodeHash !== null;
+export function maxFamilies(): number {
+  const n = Number(process.env.MAX_FAMILIES);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_FAMILIES;
 }
 
-export async function issueFamilyToken(db: Database, now = Date.now()): Promise<string> {
-  const row = await getSettingsRow(db);
-  const secret = await getSecret(db, row);
-  const payload = Buffer.from(JSON.stringify({ f: row.familyVersion, exp: now + FAMILY_TTL_MS })).toString('base64url');
-  return `${payload}.${familySign(payload, secret)}`;
+/** "Nhà Tuệ Anh " => "nha tue anh" – so khớp tên không phân biệt dấu, hoa/thường, khoảng trắng. */
+export function normalizeFamilyName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-/** Máy này có được vào ứng dụng không (luôn đúng khi chưa bật mã gia đình). */
-export async function hasFamilyAccess(db: Database, token: string | undefined, now = Date.now()): Promise<boolean> {
-  const row = await getSettingsRow(db);
-  if (!isFamilyCodeEnabled(row)) return true;
-  if (!token) return false;
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature) return false;
-  const secret = await getSecret(db, row);
-  const expected = Buffer.from(familySign(payload, secret));
-  const actual = Buffer.from(signature);
-  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return false;
-  try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { f?: number; exp?: number };
-    return data.f === row.familyVersion && typeof data.exp === 'number' && data.exp > now;
-  } catch {
-    return false;
+const cleanName = (name: string) => name.replace(/\s+/g, ' ').trim();
+
+// ---------- Đăng ký ----------
+
+export interface RegistrationInfo {
+  /** Có tạo thêm gia đình được không. */
+  open: boolean;
+  /** Cần mã mời (đã có ít nhất 1 gia đình). */
+  inviteRequired: boolean;
+  /** Đã đủ số gia đình tối đa. */
+  full: boolean;
+}
+
+export async function getRegistrationInfo(db: Database): Promise<RegistrationInfo> {
+  const [row] = await db.select({ n: count() }).from(families);
+  const n = row?.n ?? 0;
+  const full = n >= maxFamilies();
+  const inviteRequired = n > 0;
+  const inviteConfigured = Boolean(process.env.FAMILY_INVITE_CODE);
+  return { open: !full && (!inviteRequired || inviteConfigured), inviteRequired, full };
+}
+
+function inviteMatches(invite: string | undefined): boolean {
+  const expected = process.env.FAMILY_INVITE_CODE;
+  if (!expected || !invite) return false;
+  const a = Buffer.from(invite.trim());
+  const b = Buffer.from(expected.trim());
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export async function registerFamily(
+  db: Database,
+  input: { name: string; code: string; pin?: string | undefined; invite?: string | undefined },
+): Promise<string> {
+  const name = cleanName(input.name);
+  const nameKey = normalizeFamilyName(name);
+  const codeHash = await hashPin(input.code);
+  const pinHash = input.pin ? await hashPin(input.pin) : null;
+  return db.transaction(async (tx) => {
+    // Khoá bảng để đếm chính xác khi nhiều người đăng ký cùng lúc.
+    await tx.execute(sql`lock table ${families} in share row exclusive mode`);
+    const info = await getRegistrationInfo(tx);
+    if (info.full) throw conflict(`Hệ thống đã đủ ${maxFamilies()} gia đình`);
+    if (info.inviteRequired) {
+      if (!process.env.FAMILY_INVITE_CODE) throw new ApiError(403, 'registration_closed', 'Chưa mở đăng ký gia đình mới');
+      if (!inviteMatches(input.invite)) throw new ApiError(403, 'wrong_invite', 'Mã mời chưa đúng');
+    }
+    const [existing] = await tx.select({ id: families.id }).from(families).where(eq(families.nameKey, nameKey));
+    if (existing) throw conflict('Tên gia đình này đã có, hãy chọn tên khác');
+    const [row] = await tx.insert(families).values({ name, nameKey, codeHash, pinHash }).returning({ id: families.id });
+    await tx.insert(progress).values({ familyId: row!.id });
+    return row!.id;
+  });
+}
+
+// ---------- Đăng nhập ----------
+
+const wrongLogin = () => new ApiError(401, 'wrong_family_login', 'Tên gia đình hoặc mã chưa đúng');
+
+/**
+ * Đăng nhập gia đình trên máy mới bằng mã gia đình, hoặc PIN phụ huynh (khi quên mã).
+ * Trả về id gia đình. Có khoá chống dò mã theo từng gia đình.
+ */
+export async function loginFamily(
+  db: Database,
+  input: { name: string; code?: string | undefined; pin?: string | undefined },
+  now = new Date(),
+): Promise<string> {
+  const [family] = await db.select().from(families).where(eq(families.nameKey, normalizeFamilyName(input.name)));
+  if (!family) throw wrongLogin();
+
+  if (input.pin !== undefined) {
+    if (!family.pinHash) throw wrongLogin();
+    await checkPinWithLockout(db, family.id, input.pin, now);
+    return family.id;
   }
+
+  // Gia đình cũ chưa đặt mã lẫn PIN: chỉ cần tên (phụ huynh nên đặt mã ngay).
+  if (!family.codeHash) {
+    if (family.pinHash) throw new ApiError(401, 'use_pin', 'Gia đình này chưa có mã gia đình, hãy đăng nhập bằng PIN phụ huynh');
+    return family.id;
+  }
+  if (family.codeLockedUntil && family.codeLockedUntil > now) {
+    const minutes = Math.ceil((family.codeLockedUntil.getTime() - now.getTime()) / 60_000);
+    throw new ApiError(423, 'locked', `Nhập sai quá nhiều lần. Thử lại sau ${minutes} phút nhé.`);
+  }
+  if (input.code !== undefined && (await verifyPin(input.code, family.codeHash))) {
+    if (family.failedCodeAttempts > 0 || family.codeLockedUntil) {
+      await db.update(families).set({ failedCodeAttempts: 0, codeLockedUntil: null }).where(eq(families.id, family.id));
+    }
+    return family.id;
+  }
+  const attempts = family.failedCodeAttempts + 1;
+  const lock = attempts >= MAX_PIN_ATTEMPTS;
+  await db
+    .update(families)
+    .set({ failedCodeAttempts: lock ? 0 : attempts, codeLockedUntil: lock ? new Date(now.getTime() + PIN_LOCK_MS) : null })
+    .where(eq(families.id, family.id));
+  if (lock) throw new ApiError(423, 'locked', 'Nhập sai quá nhiều lần. Thử lại sau 5 phút nhé.');
+  throw wrongLogin();
+}
+
+// ---------- Cookie gia đình ----------
+
+export async function issueFamilyToken(db: Database, familyId: string, now = Date.now()): Promise<string> {
+  const row = await getFamilyRow(db, familyId);
+  return signToken(db, 'family', { fid: familyId, f: row.familyVersion, exp: now + FAMILY_TTL_MS });
+}
+
+/** Gia đình đang đăng nhập trên máy này (null nếu chưa / token hết hiệu lực). */
+export async function familyFromToken(db: Database, token: string | undefined, now = Date.now()): Promise<string | null> {
+  const data = await readToken<{ fid?: string; f?: number; exp?: number }>(db, 'family', token, now);
+  if (!data?.fid) return null;
+  const [row] = await db
+    .select({ familyVersion: families.familyVersion })
+    .from(families)
+    .where(eq(families.id, data.fid));
+  return row && row.familyVersion === data.f ? data.fid : null;
 }
 
 export function familyRequired(): ApiError {
-  return new ApiError(401, 'family_required', 'Cần nhập mã gia đình');
-}
-
-/** Kiểm tra mã gia đình, có khoá chống dò mã. Ném lỗi nếu sai hoặc đang bị khoá. */
-export async function checkFamilyCode(db: Database, code: string, now = new Date()): Promise<void> {
-  const row = await getSettingsRow(db);
-  if (!row.familyCodeHash) return;
-  if (row.familyLockedUntil && row.familyLockedUntil > now) {
-    const minutes = Math.ceil((row.familyLockedUntil.getTime() - now.getTime()) / 60_000);
-    throw new ApiError(423, 'locked', `Nhập sai quá nhiều lần. Thử lại sau ${minutes} phút nhé.`);
-  }
-  if (await verifyPin(code, row.familyCodeHash)) {
-    if (row.failedFamilyAttempts > 0 || row.familyLockedUntil) {
-      await db.update(appSettings).set({ failedFamilyAttempts: 0, familyLockedUntil: null }).where(eq(appSettings.id, 1));
-    }
-    return;
-  }
-  const attempts = row.failedFamilyAttempts + 1;
-  const lock = attempts >= MAX_PIN_ATTEMPTS;
-  await db
-    .update(appSettings)
-    .set({
-      failedFamilyAttempts: lock ? 0 : attempts,
-      familyLockedUntil: lock ? new Date(now.getTime() + PIN_LOCK_MS) : null,
-    })
-    .where(eq(appSettings.id, 1));
-  throw new ApiError(
-    401,
-    'wrong_family_code',
-    lock ? 'Nhập sai quá nhiều lần. Thử lại sau 5 phút nhé.' : `Mã gia đình chưa đúng (còn ${MAX_PIN_ATTEMPTS - attempts} lần thử).`,
-  );
-}
-
-/** Đặt / đổi (code là chuỗi số) hoặc tắt (code = null) mã gia đình. Mọi máy cũ phải nhập lại. */
-export async function setFamilyCode(db: Database, code: string | null): Promise<void> {
-  const hash = code === null ? null : await hashPin(code);
-  await getSettingsRow(db);
-  await db
-    .update(appSettings)
-    .set({
-      familyCodeHash: hash,
-      familyVersion: sql`${appSettings.familyVersion} + 1`,
-      failedFamilyAttempts: 0,
-      familyLockedUntil: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(appSettings.id, 1));
-}
-
-export async function bumpFamilyVersion(db: Database): Promise<void> {
-  await db
-    .update(appSettings)
-    .set({ familyVersion: sql`${appSettings.familyVersion} + 1`, updatedAt: new Date() })
-    .where(eq(appSettings.id, 1));
+  return new ApiError(401, 'family_required', 'Cần đăng nhập gia đình');
 }
 
 export function buildFamilyCookie(token: string | null, secure: boolean): string {
@@ -118,4 +170,37 @@ export function buildFamilyCookie(token: string | null, secure: boolean): string
   ];
   if (secure) parts.push('Secure');
   return parts.join('; ');
+}
+
+// ---------- Quản lý (phụ huynh) ----------
+
+/** Đổi mã gia đình: mọi máy khác phải đăng nhập lại. */
+export async function setFamilyCode(db: Database, familyId: string, code: string): Promise<void> {
+  const codeHash = await hashPin(code);
+  await db
+    .update(families)
+    .set({
+      codeHash,
+      familyVersion: sql`${families.familyVersion} + 1`,
+      failedCodeAttempts: 0,
+      codeLockedUntil: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(families.id, familyId));
+}
+
+export async function bumpFamilyVersion(db: Database, familyId: string): Promise<void> {
+  await db
+    .update(families)
+    .set({ familyVersion: sql`${families.familyVersion} + 1`, updatedAt: new Date() })
+    .where(eq(families.id, familyId));
+}
+
+export async function renameFamily(db: Database, familyId: string, rawName: string): Promise<string> {
+  const name = cleanName(rawName);
+  const nameKey = normalizeFamilyName(name);
+  const [existing] = await db.select({ id: families.id }).from(families).where(eq(families.nameKey, nameKey));
+  if (existing && existing.id !== familyId) throw conflict('Tên gia đình này đã có, hãy chọn tên khác');
+  await db.update(families).set({ name, nameKey, updatedAt: new Date() }).where(eq(families.id, familyId));
+  return name;
 }

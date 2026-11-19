@@ -1,17 +1,19 @@
 /**
- * Xác thực phụ huynh.
- *  - PIN được băm bằng scrypt + salt ngẫu nhiên, KHÔNG lưu văn bản thuần.
- *  - Đăng nhập thành công => cookie HttpOnly chứa token ký HMAC (hết hạn 30 phút).
- *  - Sai PIN 5 lần => khoá 5 phút (lưu trong database, bền vững giữa các instance).
- *  - Mọi API nhạy cảm (xoá, nhập, xuất dữ liệu, lịch sử) kiểm tra token tại backend.
+ * Tiện ích xác thực dùng chung + xác thực phụ huynh (theo từng gia đình).
+ *  - PIN / mã gia đình được băm bằng scrypt + salt ngẫu nhiên, KHÔNG lưu văn bản thuần.
+ *  - Token ký HMAC bằng một khoá bí mật chung; mỗi loại token có "miền" riêng
+ *    (phụ huynh / gia đình) nên không thể dùng lẫn cho nhau.
+ *  - Đăng nhập phụ huynh thành công => cookie HttpOnly (hết hạn 30 phút), gắn với
+ *    đúng gia đình đang đăng nhập trên máy.
+ *  - Sai PIN 5 lần => khoá 5 phút (lưu trong database).
  */
 import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { eq } from 'drizzle-orm';
-import { appSettings, type AppSettingsRow } from '../db/schema.js';
+import { appSettings, families } from '../db/schema.js';
 import type { Database } from './db.js';
 import { ApiError, conflict, unauthorized } from './errors.js';
-import { bumpSessionVersion, getSettingsRow } from './services/settingsService.js';
+import { bumpSessionVersion, getFamilyRow, getGlobalSettingsRow } from './services/settingsService.js';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, keylen: number, opts: object) => Promise<Buffer>;
 
@@ -35,83 +37,101 @@ export async function verifyPin(pin: string, stored: string): Promise<boolean> {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-export async function getSecret(db: Database, row: AppSettingsRow): Promise<string> {
+/** Khoá bí mật chung: ưu tiên biến môi trường, nếu không có thì tự sinh và lưu DB. */
+export async function getSecret(db: Database): Promise<string> {
   const fromEnv = process.env.PARENT_SESSION_SECRET;
   if (fromEnv && fromEnv.length >= 16) return fromEnv;
+  const row = await getGlobalSettingsRow(db);
   if (row.sessionSecret) return row.sessionSecret;
   const secret = randomBytes(32).toString('base64url');
   await db.update(appSettings).set({ sessionSecret: secret }).where(eq(appSettings.id, 1));
   return secret;
 }
 
-export function sign(payload: string, secret: string): string {
-  return createHmac('sha256', secret).update(payload).digest('base64url');
+/** Ký token: `domain` tách riêng từng loại token. */
+export async function signToken(db: Database, domain: string, data: Record<string, unknown>): Promise<string> {
+  const secret = await getSecret(db);
+  const payload = Buffer.from(JSON.stringify(data)).toString('base64url');
+  return `${payload}.${hmac(`${domain}:${payload}`, secret)}`;
 }
 
-export async function issueToken(db: Database, now = Date.now()): Promise<string> {
-  const row = await getSettingsRow(db);
-  const secret = await getSecret(db, row);
-  const payload = Buffer.from(JSON.stringify({ v: row.sessionVersion, exp: now + SESSION_TTL_MS })).toString(
-    'base64url',
-  );
-  return `${payload}.${sign(payload, secret)}`;
-}
-
-export async function isTokenValid(db: Database, token: string | undefined, now = Date.now()): Promise<boolean> {
-  if (!token) return false;
+/** Kiểm tra chữ ký + hạn dùng; trả dữ liệu trong token hoặc null. */
+export async function readToken<T extends { exp?: number }>(
+  db: Database,
+  domain: string,
+  token: string | undefined,
+  now = Date.now(),
+): Promise<T | null> {
+  if (!token) return null;
   const [payload, signature] = token.split('.');
-  if (!payload || !signature) return false;
-  const row = await getSettingsRow(db);
-  if (!row.pinHash) return false;
-  const secret = await getSecret(db, row);
-  const expected = Buffer.from(sign(payload, secret));
+  if (!payload || !signature) return null;
+  const secret = await getSecret(db);
+  const expected = Buffer.from(hmac(`${domain}:${payload}`, secret));
   const actual = Buffer.from(signature);
-  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return false;
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
   try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { v?: number; exp?: number };
-    return data.v === row.sessionVersion && typeof data.exp === 'number' && data.exp > now;
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as T;
+    return typeof data.exp === 'number' && data.exp > now ? data : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export async function requireParent(db: Database, token: string | undefined): Promise<void> {
-  if (!(await isTokenValid(db, token))) throw unauthorized();
+function hmac(payload: string, secret: string): string {
+  return createHmac('sha256', secret).update(payload).digest('base64url');
 }
 
-export async function setupPin(db: Database, pin: string): Promise<void> {
+// ---------- Phụ huynh ----------
+
+export async function issueToken(db: Database, familyId: string, now = Date.now()): Promise<string> {
+  const row = await getFamilyRow(db, familyId);
+  return signToken(db, 'parent', { fid: familyId, v: row.sessionVersion, exp: now + SESSION_TTL_MS });
+}
+
+/** Token phụ huynh hợp lệ VÀ thuộc đúng gia đình đang đăng nhập trên máy. */
+export async function isTokenValid(db: Database, familyId: string, token: string | undefined, now = Date.now()): Promise<boolean> {
+  const data = await readToken<{ fid?: string; v?: number; exp?: number }>(db, 'parent', token, now);
+  if (!data || data.fid !== familyId) return false;
+  const row = await getFamilyRow(db, familyId);
+  return row.pinHash !== null && data.v === row.sessionVersion;
+}
+
+export async function requireParent(db: Database, familyId: string, token: string | undefined): Promise<void> {
+  if (!(await isTokenValid(db, familyId, token))) throw unauthorized();
+}
+
+export async function setupPin(db: Database, familyId: string, pin: string): Promise<void> {
   const hash = await hashPin(pin);
   await db.transaction(async (tx) => {
-    const row = await getSettingsRow(tx, true);
+    const row = await getFamilyRow(tx, familyId, true);
     if (row.pinHash) throw conflict('Mã PIN đã được thiết lập');
-    await tx.update(appSettings).set({ pinHash: hash, updatedAt: new Date() }).where(eq(appSettings.id, 1));
+    await tx.update(families).set({ pinHash: hash, updatedAt: new Date() }).where(eq(families.id, familyId));
   });
 }
 
 /** Kiểm tra PIN có khoá chống dò mã. Ném lỗi nếu sai hoặc đang bị khoá. */
-export async function checkPinWithLockout(db: Database, pin: string, now = new Date()): Promise<void> {
-  const row = await getSettingsRow(db);
+export async function checkPinWithLockout(db: Database, familyId: string, pin: string, now = new Date()): Promise<void> {
+  const row = await getFamilyRow(db, familyId);
   if (!row.pinHash) throw conflict('Chưa thiết lập mã PIN');
   if (row.pinLockedUntil && row.pinLockedUntil > now) {
     const minutes = Math.ceil((row.pinLockedUntil.getTime() - now.getTime()) / 60_000);
     throw new ApiError(423, 'locked', `Nhập sai quá nhiều lần. Vui lòng thử lại sau ${minutes} phút.`);
   }
-  const ok = await verifyPin(pin, row.pinHash);
-  if (ok) {
+  if (await verifyPin(pin, row.pinHash)) {
     if (row.failedPinAttempts > 0 || row.pinLockedUntil) {
-      await db.update(appSettings).set({ failedPinAttempts: 0, pinLockedUntil: null }).where(eq(appSettings.id, 1));
+      await db.update(families).set({ failedPinAttempts: 0, pinLockedUntil: null }).where(eq(families.id, familyId));
     }
     return;
   }
   const attempts = row.failedPinAttempts + 1;
   const lock = attempts >= MAX_PIN_ATTEMPTS;
   await db
-    .update(appSettings)
+    .update(families)
     .set({
       failedPinAttempts: lock ? 0 : attempts,
       pinLockedUntil: lock ? new Date(now.getTime() + PIN_LOCK_MS) : null,
     })
-    .where(eq(appSettings.id, 1));
+    .where(eq(families.id, familyId));
   throw new ApiError(
     401,
     'wrong_pin',
@@ -121,11 +141,11 @@ export async function checkPinWithLockout(db: Database, pin: string, now = new D
   );
 }
 
-export async function changePin(db: Database, currentPin: string, newPin: string): Promise<void> {
-  await checkPinWithLockout(db, currentPin);
+export async function changePin(db: Database, familyId: string, currentPin: string, newPin: string): Promise<void> {
+  await checkPinWithLockout(db, familyId, currentPin);
   const hash = await hashPin(newPin);
-  await db.update(appSettings).set({ pinHash: hash, updatedAt: new Date() }).where(eq(appSettings.id, 1));
-  await bumpSessionVersion(db); // đăng xuất mọi phiên cũ
+  await db.update(families).set({ pinHash: hash, updatedAt: new Date() }).where(eq(families.id, familyId));
+  await bumpSessionVersion(db, familyId); // đăng xuất mọi phiên cũ
 }
 
 export function buildCookie(token: string | null, secure: boolean): string {

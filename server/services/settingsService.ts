@@ -1,52 +1,62 @@
 import { eq, sql } from 'drizzle-orm';
-import { appSettings, type AppSettingsRow } from '../../db/schema.js';
+import { appSettings, families, type AppSettingsRow, type FamilyRow } from '../../db/schema.js';
 import type { Database } from '../db.js';
+import { notFound } from '../errors.js';
 
 export interface PublicSettings {
   soundEnabled: boolean;
   reducedMotion: boolean;
   pinConfigured: boolean;
-  familyCodeEnabled: boolean;
+  familyName: string;
 }
 
-/** Đảm bảo dòng cài đặt (id = 1) tồn tại rồi trả về. */
-export async function getSettingsRow(db: Database, forUpdate = false): Promise<AppSettingsRow> {
+/** Cấu hình chung của hệ thống (id = 1) – chỉ chứa khoá bí mật ký cookie. */
+export async function getGlobalSettingsRow(db: Database): Promise<AppSettingsRow> {
   await db.insert(appSettings).values({ id: 1 }).onConflictDoNothing();
-  const query = db.select().from(appSettings).where(eq(appSettings.id, 1));
-  const rows = forUpdate ? await query.for('update') : await query;
-  const row = rows[0];
+  const [row] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
   if (!row) throw new Error('Không đọc được cài đặt');
   return row;
 }
 
-export function toPublicSettings(row: AppSettingsRow): PublicSettings {
+/** Dòng của một gia đình (cài đặt + bảo mật). */
+export async function getFamilyRow(db: Database, familyId: string, forUpdate = false): Promise<FamilyRow> {
+  const query = db.select().from(families).where(eq(families.id, familyId));
+  const rows = forUpdate ? await query.for('update') : await query;
+  const row = rows[0];
+  if (!row) throw notFound('Không tìm thấy gia đình');
+  return row;
+}
+
+export function toPublicSettings(row: FamilyRow): PublicSettings {
   return {
     soundEnabled: row.soundEnabled,
     reducedMotion: row.reducedMotion,
     pinConfigured: row.pinHash !== null,
-    familyCodeEnabled: row.familyCodeHash !== null,
+    familyName: row.name,
   };
 }
 
-export async function getPublicSettings(db: Database): Promise<PublicSettings> {
-  return toPublicSettings(await getSettingsRow(db));
+export async function getPublicSettings(db: Database, familyId: string): Promise<PublicSettings> {
+  return toPublicSettings(await getFamilyRow(db, familyId));
 }
 
 export async function updateSettings(
   db: Database,
+  familyId: string,
   patch: { soundEnabled?: boolean | undefined; reducedMotion?: boolean | undefined },
 ): Promise<PublicSettings> {
-  await getSettingsRow(db);
-  const values: Partial<AppSettingsRow> = { updatedAt: new Date() };
+  const values: Partial<FamilyRow> = { updatedAt: new Date() };
   if (patch.soundEnabled !== undefined) values.soundEnabled = patch.soundEnabled;
   if (patch.reducedMotion !== undefined) values.reducedMotion = patch.reducedMotion;
-  const [row] = await db.update(appSettings).set(values).where(eq(appSettings.id, 1)).returning();
-  return toPublicSettings(row!);
+  const [row] = await db.update(families).set(values).where(eq(families.id, familyId)).returning();
+  if (!row) throw notFound('Không tìm thấy gia đình');
+  return toPublicSettings(row);
 }
 
-export async function bumpSessionVersion(db: Database): Promise<void> {
+/** Đăng xuất mọi phiên phụ huynh của gia đình. */
+export async function bumpSessionVersion(db: Database, familyId: string): Promise<void> {
   await db
-    .update(appSettings)
-    .set({ sessionVersion: sql`${appSettings.sessionVersion} + 1`, updatedAt: new Date() })
-    .where(eq(appSettings.id, 1));
+    .update(families)
+    .set({ sessionVersion: sql`${families.sessionVersion} + 1`, updatedAt: new Date() })
+    .where(eq(families.id, familyId));
 }

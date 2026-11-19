@@ -10,10 +10,67 @@ import type { Question } from '../src/engine/types';
 let db: Database;
 let close: () => Promise<void>;
 let cookie = '';
+/** Cookie đăng nhập gia đình "Nhà Test" (mọi request trong các test chính đều gửi kèm). */
+let familyCookie = '';
 let ipCounter = 0;
+
+/** Lấy giá trị một cookie trong header Set-Cookie của phản hồi. */
+function cookieFrom(res: { headers?: Record<string, string | string[]> }, name: string): string {
+  const set = res.headers?.['Set-Cookie'];
+  for (const c of Array.isArray(set) ? set : set ? [set] : []) {
+    const pair = c.split(';')[0]!;
+    if (pair.startsWith(`${name}=`)) return pair;
+  }
+  return '';
+}
+
+/**
+ * Một "máy" độc lập có hũ cookie riêng, gọi API trên database chỉ định.
+ * Dùng cho các test cần database riêng / nhiều gia đình.
+ */
+function device(database: Database) {
+  const jar: Record<string, string> = {};
+  return async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const res = await handleApiRequest(
+      {
+        method,
+        path,
+        query: {},
+        headers: {
+          'x-bvht-client': '1',
+          cookie: Object.entries(jar)
+            .map(([k, v]) => `${k}=${v}`)
+            .join('; '),
+          ...headers,
+        },
+        body,
+        ip: `10.8.${Math.floor(++ipCounter / 250) % 250}.${ipCounter % 250}`,
+        secure: true,
+      },
+      database,
+    );
+    const set = res.headers?.['Set-Cookie'];
+    for (const c of Array.isArray(set) ? set : set ? [set] : []) {
+      const [pair] = c.split(';');
+      const idx = pair!.indexOf('=');
+      const k = pair!.slice(0, idx);
+      const v = pair!.slice(idx + 1);
+      if (v) jar[k] = v;
+      else delete jar[k];
+    }
+    return res;
+  };
+}
 
 beforeAll(async () => {
   ({ db, close } = await createPgliteDatabase());
+  const reg = await handleApiRequest(
+    { method: 'POST', path: 'family/register', query: {}, headers: { 'x-bvht-client': '1' }, body: { name: 'Nhà Test', code: '111111' }, ip: '10.0.9.9', secure: true },
+    db,
+  );
+  expect(reg.status).toBe(200);
+  familyCookie = cookieFrom(reg, 'bvht_family');
+  expect(familyCookie).not.toBe('');
 });
 afterAll(async () => close());
 beforeEach(() => resetRateLimits());
@@ -21,7 +78,7 @@ beforeEach(() => resetRateLimits());
 async function call(method: string, path: string, body?: unknown, opts: { auth?: boolean; csrf?: boolean; ip?: string; query?: Record<string, string> } = {}) {
   const headers: Record<string, string | undefined> = {};
   if (opts.csrf !== false) headers['x-bvht-client'] = '1';
-  if (opts.auth) headers.cookie = cookie;
+  headers.cookie = [familyCookie, opts.auth ? cookie : ''].filter(Boolean).join('; ');
   const req: ApiRequest = {
     method,
     path,
@@ -158,8 +215,9 @@ describe('Luồng làm bài + phần thưởng', () => {
     const summary = (await call('GET', 'summary')).body as { chapters: { chapterId: string; stars: number; bestScore: number }[]; overallProgress: number };
     const nr = summary.chapters.find((c) => c.chapterId === 'number-recognition')!;
     expect(nr).toMatchObject({ stars: 3, bestScore: 10 });
-    // 2/21 bài đạt 3 sao ("Tìm số" và 18 trò cấp 11–100 chưa chơi) => 6/63 sao ≈ 10%.
-    expect(summary.overallProgress).toBe(10);
+    // Chỉ tính trò đã mở khoá: cấp 1–10 (2 trò) + Bé tập đếm; "Tìm số" chưa chơi
+    // nên cấp 11–20 còn khoá => 6/9 sao ≈ 67%.
+    expect(summary.overallProgress).toBe(67);
   });
 
   it('hộp quà: chưa đủ kẹo => 409; đủ kẹo mở 1 lần, gọi lặp cùng giftId không mở thêm', async () => {
@@ -200,7 +258,7 @@ describe('Khu vực phụ huynh & bảo mật', () => {
     expect(setup.status).toBe(200);
     expect((await call('POST', 'parent/setup', { pin: '1111' })).status).toBe(409);
 
-    const rows = await db.execute(sql`select pin_hash from app_settings where id = 1`);
+    const rows = await db.execute(sql`select pin_hash from families`);
     const hash = (rows as unknown as { rows: { pin_hash: string }[] }).rows[0]!.pin_hash;
     expect(hash).not.toContain('2468');
     expect(hash.startsWith('scrypt$')).toBe(true);
@@ -257,9 +315,10 @@ describe('Khu vực phụ huynh & bảo mật', () => {
     expect(imported.status).toBe(200);
     expect((await call('GET', 'summary')).body).toEqual(summaryBefore);
 
-    // Export lại giống hệt (trừ thời điểm xuất)
+    // Export lại giống hệt (trừ thời điểm xuất và mã phiên/hộp quà – được cấp mới khi nhập)
     const again = (await call('GET', 'backup/export', undefined, { auth: true })).body as typeof backup & { exportedAt: string };
-    expect({ ...again, exportedAt: '' }).toEqual({ ...backup, exportedAt: '' });
+    const noIds = (x: unknown) => JSON.parse(JSON.stringify(x).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, 'ID'));
+    expect(noIds({ ...again, exportedAt: '' })).toEqual(noIds({ ...backup, exportedAt: '' }));
   });
 
   it('nhập file không hợp lệ bị từ chối và KHÔNG làm mất dữ liệu', async () => {
@@ -306,11 +365,9 @@ describe('Khu vực phụ huynh & bảo mật', () => {
 describe('Khoá cấp độ (cơ sở dữ liệu riêng, bắt đầu từ trống)', () => {
   it('cấp 11–20 bị server chặn tới khi đạt >= 8 điểm ở cả hai trò cấp 1–10', async () => {
     const fresh = await createPgliteDatabase();
-    const callFresh = (path: string, body: unknown) =>
-      handleApiRequest(
-        { method: 'POST', path, query: {}, headers: { 'x-bvht-client': '1' }, body, ip: `10.9.0.${++ipCounter % 250}`, secure: true },
-        fresh.db,
-      );
+    const dev = device(fresh.db);
+    expect((await dev('POST', 'family/register', { name: 'Nhà Cấp Độ', code: '2222' })).status).toBe(200);
+    const callFresh = (path: string, body: unknown) => dev('POST', path, body);
     const playFresh = async (chapterId: string, wrongOnFirst: number) => {
       const start = await callFresh('quiz/sessions', { chapterId });
       expect(start.status).toBe(200);
@@ -340,6 +397,11 @@ describe('Khoá cấp độ (cơ sở dữ liệu riêng, bắt đầu từ tr�
       expect(done.body).toMatchObject({ score: 10, candiesEarned: 1 });
       expect((done.body as { rewards: { rewardCode: string }[] }).rewards.map((r) => r.rewardCode)).toContain('sports-medal');
       expect((await playFresh('number-finding-11-20', 0)).body).toMatchObject({ score: 10 });
+
+      // Tiến độ tổng chỉ tính trò đã mở: cấp 1–10 (2+2 sao), Bé tập đếm (0), cấp 11–20 (3+3),
+      // cấp 21–30 vừa mở (0+0) => 10/21 sao ≈ 48%. Các cấp 31–100 còn khoá không tính.
+      const summary = await dev('GET', 'summary');
+      expect((summary.body as { overallProgress: number }).overallProgress).toBe(48);
     } finally {
       await fresh.close();
     }
@@ -355,99 +417,157 @@ describe('Trò chơi phụ "Tìm số"', () => {
   });
 });
 
-describe('Mã gia đình (cơ sở dữ liệu riêng)', () => {
-  it('chưa bật thì mở; bật rồi thì máy lạ bị chặn, nhập đúng mã thì vào được', async () => {
+describe('Nhiều gia đình (cơ sở dữ liệu riêng)', () => {
+  const OLD_INVITE = process.env.FAMILY_INVITE_CODE;
+  const OLD_MAX = process.env.MAX_FAMILIES;
+  afterAll(() => {
+    if (OLD_INVITE === undefined) delete process.env.FAMILY_INVITE_CODE;
+    else process.env.FAMILY_INVITE_CODE = OLD_INVITE;
+    if (OLD_MAX === undefined) delete process.env.MAX_FAMILIES;
+    else process.env.MAX_FAMILIES = OLD_MAX;
+  });
+
+  it('đăng ký cần mã mời (trừ gia đình đầu tiên), giới hạn số gia đình, tên không trùng', async () => {
     const fresh = await createPgliteDatabase();
-    /** Mỗi "máy" có hũ cookie riêng. */
-    const device = () => {
-      const jar: Record<string, string> = {};
-      return async (method: string, path: string, body?: unknown) => {
-        const res = await handleApiRequest(
-          {
-            method,
-            path,
-            query: {},
-            headers: {
-              'x-bvht-client': '1',
-              cookie: Object.entries(jar)
-                .map(([k, v]) => `${k}=${v}`)
-                .join('; '),
-            },
-            body,
-            ip: `10.8.0.${++ipCounter % 250}`,
-            secure: true,
-          },
-          fresh.db,
-        );
-        const set = res.headers?.['Set-Cookie'];
-        for (const c of Array.isArray(set) ? set : set ? [set] : []) {
-          const [pair] = c.split(';');
-          const [k, v] = pair!.split('=');
-          if (v) jar[k!] = v;
-          else delete jar[k!];
-        }
-        return res;
-      };
-    };
     try {
-      const parent = device();
-      const stranger = device();
+      delete process.env.FAMILY_INVITE_CODE;
+      process.env.MAX_FAMILIES = '3';
+      const a = device(fresh.db);
+      const status0 = await a('GET', 'family/status');
+      expect(status0.body).toEqual({ loggedIn: false, registration: { open: true, inviteRequired: false, full: false } });
+      // Chưa đăng nhập: mọi API dữ liệu bị chặn
+      expect((await a('GET', 'summary')).body).toMatchObject({ error: { code: 'family_required' } });
 
-      // Chưa bật: ai cũng vào được.
-      expect((await stranger('GET', 'summary')).status).toBe(200);
-      expect((await stranger('GET', 'family/status')).body).toEqual({ enabled: false, unlocked: true });
+      // Gia đình đầu tiên tạo tự do
+      expect((await a('POST', 'family/register', { name: 'Nhà Tuệ Anh', code: '123456', pin: '2468' })).status).toBe(200);
+      expect((await a('GET', 'family/status')).body).toMatchObject({ loggedIn: true, family: { name: 'Nhà Tuệ Anh', hasCode: true } });
+      // Đăng ký kèm PIN => vào luôn khu phụ huynh
+      expect((await a('GET', 'parent/session')).body).toEqual({ pinConfigured: true, authenticated: true });
 
-      // Phụ huynh đặt PIN rồi bật mã gia đình (chỉ phụ huynh mới đặt được).
-      expect((await stranger('PUT', 'family/code', { code: '123456' })).status).toBe(401);
-      expect((await parent('POST', 'parent/setup', { pin: '2468' })).status).toBe(200);
-      expect((await parent('PUT', 'family/code', { code: '12' })).status).toBe(400);
-      expect((await parent('PUT', 'family/code', { code: '123456' })).body).toEqual({ enabled: true });
-      const rows = await fresh.db.execute(sql`select family_code_hash from app_settings where id = 1`);
-      expect((rows as unknown as { rows: { family_code_hash: string }[] }).rows[0]!.family_code_hash).toMatch(/^scrypt\$/);
+      // Gia đình thứ hai: chưa đặt mã mời trên server => đóng đăng ký
+      const b = device(fresh.db);
+      expect((await b('GET', 'family/status')).body).toMatchObject({ registration: { open: false, inviteRequired: true } });
+      expect((await b('POST', 'family/register', { name: 'Nhà Bin', code: '654321' })).body).toMatchObject({ error: { code: 'registration_closed' } });
+      process.env.FAMILY_INVITE_CODE = 'moi-ban-be';
+      expect((await b('POST', 'family/register', { name: 'Nhà Bin', code: '654321', invite: 'sai' })).body).toMatchObject({ error: { code: 'wrong_invite' } });
+      // Tên trùng (không phân biệt dấu / hoa thường / khoảng trắng)
+      expect((await b('POST', 'family/register', { name: '  nha TUE   anh ', code: '654321', invite: 'moi-ban-be' })).status).toBe(409);
+      expect((await b('POST', 'family/register', { name: 'Nhà Bin', code: '654321', invite: 'moi-ban-be' })).status).toBe(200);
+      const c = device(fresh.db);
+      expect((await c('POST', 'family/register', { name: 'Nhà Na', code: '777777', invite: 'moi-ban-be' })).status).toBe(200);
+      // Đủ 3 gia đình
+      const d = device(fresh.db);
+      expect((await d('GET', 'family/status')).body).toMatchObject({ registration: { open: false, full: true } });
+      expect((await d('POST', 'family/register', { name: 'Nhà Thứ Tư', code: '888888', invite: 'moi-ban-be' })).status).toBe(409);
+    } finally {
+      await fresh.close();
+    }
+  });
 
-      // Máy phụ huynh vẫn dùng được; máy lạ bị chặn mọi API trừ health/status/unlock.
-      expect((await parent('GET', 'summary')).status).toBe(200);
-      const blocked = await stranger('POST', 'quiz/sessions', { chapterId: 'number-recognition' });
-      expect(blocked.status).toBe(401);
-      expect(blocked.body).toMatchObject({ error: { code: 'family_required' } });
-      expect((await stranger('GET', 'summary')).status).toBe(401);
-      expect((await stranger('GET', 'health')).status).toBe(200);
-      expect((await stranger('GET', 'family/status')).body).toEqual({ enabled: true, unlocked: false });
+  it('dữ liệu mỗi gia đình tách riêng; đăng nhập bằng tên + mã hoặc PIN; khoá khi dò mã', async () => {
+    const fresh = await createPgliteDatabase();
+    try {
+      process.env.FAMILY_INVITE_CODE = 'moi';
+      delete process.env.MAX_FAMILIES;
+      const a = device(fresh.db);
+      const b = device(fresh.db);
+      await a('POST', 'family/register', { name: 'Nhà A', code: '1111', pin: '1234' });
+      await b('POST', 'family/register', { name: 'Nhà B', code: '2222', pin: '5678', invite: 'moi' });
 
-      // Token giả không qua được.
-      const forged = await handleApiRequest(
-        { method: 'GET', path: 'summary', query: {}, headers: { cookie: 'bvht_family=eyJmIjoyLCJleHAiOjk5OTk5OTk5OTk5OTl9.fake' }, body: null, ip: '10.8.1.1', secure: true },
-        fresh.db,
-      );
-      expect(forged.status).toBe(401);
+      // Gia đình A chơi 1 bài 10/10
+      const start = await a('POST', 'quiz/sessions', { chapterId: 'number-recognition' });
+      const { sessionId, questions } = start.body as { sessionId: string; questions: Question[] };
+      await fresh.db
+        .update(quizSessions)
+        .set({ startedAt: sql`${quizSessions.startedAt} - interval '60 seconds'` })
+        .where(eq(quizSessions.id, sessionId));
+      const answers = questions.map((q) => ({ questionId: q.id, attempts: [q.correctAnswer] }));
+      expect((await a('POST', `quiz/sessions/${sessionId}/complete`, { answers })).body).toMatchObject({ candiesEarned: 1 });
 
-      // Sai mã: báo còn mấy lần; đúng mã: vào được và được nhớ.
-      expect((await stranger('POST', 'family/unlock', { code: '000000' })).body).toMatchObject({ error: { code: 'wrong_family_code' } });
-      expect((await stranger('POST', 'family/unlock', { code: '123456' })).status).toBe(200);
-      expect((await stranger('GET', 'summary')).status).toBe(200);
+      // Gia đình B không thấy gì của A, không nộp hộ được phiên của A
+      expect(((await b('GET', 'summary')).body as { totals: { totalCandies: number } }).totals.totalCandies).toBe(0);
+      expect(((await a('GET', 'summary')).body as { totals: { totalCandies: number } }).totals.totalCandies).toBe(1);
+      expect((await b('POST', `quiz/sessions/${sessionId}/complete`, { answers })).status).toBe(404);
+      expect((await b('GET', `history/${sessionId}`)).status).toBe(404);
+      expect(((await b('GET', 'history')).body as { total: number }).total).toBe(0);
+      // B cũng nhận được sticker "lần đầu 10/10" riêng của mình (dedupe theo gia đình)
+      const s2 = await b('POST', 'quiz/sessions', { chapterId: 'number-recognition' });
+      const b2 = s2.body as { sessionId: string; questions: Question[] };
+      await fresh.db
+        .update(quizSessions)
+        .set({ startedAt: sql`${quizSessions.startedAt} - interval '60 seconds'` })
+        .where(eq(quizSessions.id, b2.sessionId));
+      const bDone = await b('POST', `quiz/sessions/${b2.sessionId}/complete`, {
+        answers: b2.questions.map((q) => ({ questionId: q.id, attempts: [q.correctAnswer] })),
+      });
+      expect((bDone.body as { rewards: { rewardCode: string }[] }).rewards.map((r) => r.rewardCode)).toContain('gold-medal');
 
-      // Cookie gia đình KHÔNG dùng được làm cookie phụ huynh.
-      expect((await stranger('GET', 'history')).status).toBe(401);
+      // Token phụ huynh của A không dùng được cho gia đình B
+      const aParent = device(fresh.db);
+      await aParent('POST', 'family/login', { name: 'nha a', pin: '1234' });
+      expect((await aParent('GET', 'parent/stats')).status).toBe(200);
+      const parentA = (await a('POST', 'parent/login', { pin: '1234' })).headers?.['Set-Cookie'];
+      const parentCookie = (Array.isArray(parentA) ? parentA : [String(parentA)]).find((x) => x.startsWith('bvht_parent='))!.split(';')[0]!;
+      expect((await b('GET', 'parent/stats', undefined, { cookie: `${parentCookie}` })).status).toBe(401);
 
-      // Đăng xuất mọi máy: máy lạ phải nhập lại, máy phụ huynh vẫn giữ.
-      expect((await parent('POST', 'family/logout-all')).status).toBe(200);
-      expect((await stranger('GET', 'summary')).status).toBe(401);
-      expect((await parent('GET', 'summary')).status).toBe(200);
+      // Máy mới: đăng nhập bằng tên + mã (không phân biệt dấu); sai mã thì báo chung chung
+      const c = device(fresh.db);
+      expect((await c('POST', 'family/login', { name: 'Nhà A', code: '9999' })).body).toMatchObject({ error: { code: 'wrong_family_login' } });
+      expect((await c('POST', 'family/login', { name: 'Không Có', code: '1111' })).body).toMatchObject({ error: { code: 'wrong_family_login' } });
+      expect((await c('POST', 'family/login', { name: 'nha a', code: '1111' })).status).toBe(200);
+      expect(((await c('GET', 'summary')).body as { totals: { totalCandies: number } }).totals.totalCandies).toBe(1);
+      // Đăng nhập bằng mã thì chưa phải phụ huynh
+      expect((await c('GET', 'parent/stats')).status).toBe(401);
 
-      // Máy mới quên mã: phụ huynh đăng nhập bằng PIN là vào được (khôi phục).
-      const newDevice = device();
-      expect((await newDevice('GET', 'summary')).status).toBe(401);
-      expect((await newDevice('POST', 'parent/login', { pin: '2468' })).status).toBe(200);
-      expect((await newDevice('GET', 'summary')).status).toBe(200);
+      // Token giả không qua được
+      const forged = device(fresh.db);
+      expect((await forged('GET', 'summary', undefined, { cookie: 'bvht_family=eyJmaWQiOiJ4IiwiZiI6MSwiZXhwIjo5OTk5OTk5OTk5OTk5fQ.fake' })).status).toBe(401);
 
-      // Sai 5 lần => khoá 5 phút, kể cả khi nhập đúng.
-      const attacker = device();
-      for (let i = 0; i < 5; i++) await attacker('POST', 'family/unlock', { code: '999999' });
-      expect((await attacker('POST', 'family/unlock', { code: '123456' })).status).toBe(423);
+      // Đổi mã: máy khác phải đăng nhập lại, máy đổi mã vẫn giữ
+      expect((await aParent('PUT', 'family/code', { code: '4321' })).status).toBe(200);
+      expect((await c('GET', 'summary')).status).toBe(401);
+      expect((await aParent('GET', 'summary')).status).toBe(200);
+      // Đổi tên gia đình
+      expect((await aParent('PUT', 'family/name', { name: 'Nhà Bin' })).status).toBe(200);
+      expect((await aParent('PUT', 'family/name', { name: 'Nhà B' })).status).toBe(409);
 
-      // Tắt mã: mở lại cho mọi máy.
-      expect((await parent('PUT', 'family/code', { code: null })).body).toEqual({ enabled: false });
-      expect((await stranger('GET', 'summary')).status).toBe(200);
+      // Sai mã 5 lần => khoá 5 phút, kể cả khi nhập đúng
+      const attacker = device(fresh.db);
+      for (let i = 0; i < 5; i++) await attacker('POST', 'family/login', { name: 'Nhà B', code: '0000' });
+      expect((await attacker('POST', 'family/login', { name: 'Nhà B', code: '2222' })).status).toBe(423);
+
+      // Đăng xuất gia đình trên máy
+      expect((await aParent('POST', 'family/logout')).status).toBe(200);
+      expect((await aParent('GET', 'summary')).status).toBe(401);
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  it('nhập bản sao lưu của gia đình A vào gia đình B không ảnh hưởng gia đình A', async () => {
+    const fresh = await createPgliteDatabase();
+    try {
+      process.env.FAMILY_INVITE_CODE = 'moi';
+      const a = device(fresh.db);
+      const b = device(fresh.db);
+      await a('POST', 'family/register', { name: 'Nhà A', code: '1111', pin: '1234' });
+      await b('POST', 'family/register', { name: 'Nhà B', code: '2222', pin: '5678', invite: 'moi' });
+      const start = await a('POST', 'quiz/sessions', { chapterId: 'object-counting' });
+      const { sessionId, questions } = start.body as { sessionId: string; questions: Question[] };
+      await fresh.db
+        .update(quizSessions)
+        .set({ startedAt: sql`${quizSessions.startedAt} - interval '60 seconds'` })
+        .where(eq(quizSessions.id, sessionId));
+      await a('POST', `quiz/sessions/${sessionId}/complete`, { answers: questions.map((q) => ({ questionId: q.id, attempts: [q.correctAnswer] })) });
+      const backup = (await a('GET', 'backup/export')).body;
+      expect((await b('POST', 'backup/import', { confirm: true, backup })).status).toBe(200);
+      const sa = (await a('GET', 'summary')).body as { totals: unknown };
+      const sb = (await b('GET', 'summary')).body as { totals: unknown };
+      expect(sb.totals).toEqual(sa.totals);
+      // Xoá dữ liệu B không đụng tới A
+      expect((await b('POST', 'backup/reset', { confirm: 'XOA' })).status).toBe(200);
+      expect(((await a('GET', 'summary')).body as { totals: { totalCandies: number } }).totals.totalCandies).toBe(1);
+      expect(((await a('GET', 'history')).body as { total: number }).total).toBe(1);
     } finally {
       await fresh.close();
     }

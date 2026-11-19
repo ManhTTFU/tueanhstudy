@@ -234,18 +234,20 @@ Migration chỉ được **thêm** vào; không sửa file migration đã chạy
 | Biến | Bắt buộc | Mô tả |
 |---|---|---|
 | `DATABASE_URL` | Production: **có** | Chuỗi kết nối PostgreSQL (Neon pooled). Chỉ được đọc ở `server/db.ts`; không bao giờ vào bundle frontend (Vite chỉ đưa biến `VITE_*` vào frontend). |
-| `PARENT_SESSION_SECRET` | Không | Khoá ký cookie phụ huynh. Bỏ trống ⇒ hệ thống tự sinh và lưu trong database. |
+| `PARENT_SESSION_SECRET` | Không | Khoá ký cookie (gia đình + phụ huynh). Bỏ trống ⇒ hệ thống tự sinh và lưu trong database. |
+| `FAMILY_INVITE_CODE` | Để mời gia đình khác | **Mã mời** cần nhập khi tạo gia đình mới (từ gia đình thứ 2 trở đi). Bỏ trống ⇒ đóng đăng ký. Gửi mã này cho các gia đình bạn muốn mời. |
+| `MAX_FAMILIES` | Không | Số gia đình tối đa (mặc định `10`). |
 
 Local: đặt trong `.env.local` (đã gitignore). Vercel: Project Settings → Environment Variables.
 
 ## 8. REST API
 
-Tất cả nằm dưới `/api/`. Khi đã bật **mã gia đình**, mọi API (trừ các API ghi "mở" bên dưới) trả `401 family_required` nếu máy chưa nhập mã. Request ghi dữ liệu phải có header `X-BVHT-Client: 1` (chống CSRF). Lỗi trả về dạng `{ "error": { "code", "message", "details?" } }`.
+Tất cả nằm dưới `/api/`. Mọi API (trừ các API ghi "mở") cần máy đã **đăng nhập gia đình** (cookie `bvht_family`), nếu không trả `401 family_required`; dữ liệu luôn đọc/ghi theo gia đình trong cookie. Request ghi dữ liệu phải có header `X-BVHT-Client: 1` (chống CSRF). Lỗi trả về dạng `{ "error": { "code", "message", "details?" } }`.
 
 | Method | Đường dẫn | Quyền | Mô tả |
 |---|---|---|---|
-| GET | `health` | – | Kiểm tra kết nối database |
-| GET | `chapters` | – | Danh sách chương đang bật |
+| GET | `health` | mở | Kiểm tra kết nối database |
+| GET | `chapters` | mở | Danh sách chương đang bật |
 | GET | `summary` | – | Dữ liệu trang chủ (tổng kẹo, tiến độ chương, sticker) – không tải lịch sử |
 | POST | `quiz/sessions` | – | `{chapterId}` ⇒ tạo phiên + 10 câu hỏi |
 | POST | `quiz/sessions/:id/complete` | – | `{answers:[{questionId, attempts:number[]}]}` ⇒ server chấm điểm, lưu, cộng thưởng (idempotent) |
@@ -253,10 +255,12 @@ Tất cả nằm dưới `/api/`. Khi đã bật **mã gia đình**, mọi API (
 | GET | `rewards` | – | Kẹo, sticker, số hộp quà mở được |
 | POST | `rewards/gifts/open` | – | `{giftId: uuid}` ⇒ mở hộp quà (idempotent theo `giftId`) |
 | GET / PUT | `settings` | – | Âm thanh, giảm chuyển động |
-| GET | `family/status` | mở | Mã gia đình có bật không, máy này đã nhập mã chưa |
-| POST | `family/unlock` | mở | `{code}` ⇒ nhập mã gia đình, máy được nhớ 1 năm |
-| PUT | `family/code` | Phụ huynh | `{code: "4–8 số" \| null}` ⇒ bật/đổi/tắt mã gia đình |
-| POST | `family/logout-all` | Phụ huynh | Mọi máy khác phải nhập lại mã |
+| GET | `family/status` | mở | Máy đã đăng nhập gia đình chưa, có tạo thêm gia đình được không |
+| POST | `family/login` | mở | `{name, code}` hoặc `{name, pin}` ⇒ đăng nhập gia đình (máy được nhớ 1 năm; dùng PIN thì vào luôn khu phụ huynh) |
+| POST | `family/register` | mở | `{name, code, pin, invite?}` ⇒ tạo gia đình mới (cần mã mời từ gia đình thứ 2) |
+| POST | `family/logout` | mở | Thoát gia đình trên máy này |
+| PUT | `family/code` · `family/name` | Phụ huynh | Đổi mã gia đình (máy khác phải đăng nhập lại) / đổi tên |
+| POST | `family/logout-all` | Phụ huynh | Mọi máy khác phải đăng nhập lại |
 | GET | `parent/session` | – | PIN đã thiết lập chưa, đã xác nhận chưa |
 | POST | `parent/setup` · `parent/login` · `parent/logout` | – | Thiết lập PIN / đăng nhập / đăng xuất |
 | POST | `parent/change-pin` · `parent/logout-all` | Phụ huynh | Đổi PIN / thu hồi mọi phiên |
@@ -271,11 +275,12 @@ Toàn bộ API gom vào **một** Vercel Function (`api/router.ts`) để nằm 
 
 ## 9. Khu vực phụ huynh & bảo mật
 
-**Mã gia đình** (khoá cả ứng dụng với người ngoài, bé không cần đăng nhập):
-- Mặc định **tắt** – ai có link cũng vào được. Bật trong Khu phụ huynh → Cài đặt → *Mã gia đình* (4–8 chữ số).
-- Khi bật: máy lạ thấy màn hình nhập mã; nhập đúng thì máy được nhớ **1 năm** (cookie `bvht_family`, HttpOnly, ký HMAC). Server chặn mọi API khi chưa có mã, không chỉ ẩn giao diện.
-- Mã băm bằng scrypt; sai 5 lần ⇒ khoá 5 phút. Đổi mã hoặc bấm *Đăng xuất mọi máy khác* ⇒ các máy khác phải nhập lại (máy đang thao tác được giữ).
-- **Quên mã gia đình?** Vào `/phu-huynh` (luôn mở) và đăng nhập bằng PIN – máy đó được vào luôn, rồi đặt mã mới. Quên cả PIN: chạy SQL bên dưới và thêm `family_code_hash = NULL`.
+**Nhiều gia đình** (tối đa `MAX_FAMILIES`, mặc định 10): mỗi gia đình có tên, mã gia đình, PIN phụ huynh, kẹo, sticker, cấp, lịch sử và sao lưu **riêng**.
+- **Tạo gia đình:** màn hình đầu tiên → *Tạo gia đình mới* → tên, mã gia đình (4–8 số), PIN phụ huynh (4–6 số). Gia đình đầu tiên của hệ thống tạo tự do; từ gia đình thứ 2 cần **mã mời** (`FAMILY_INVITE_CODE` trên Vercel). Chưa đặt biến này ⇒ không ai tạo thêm được.
+- **Đăng nhập trên máy mới:** *tên gia đình + mã gia đình* (không phân biệt dấu/hoa thường). Máy được nhớ **1 năm** (cookie `bvht_family`, HttpOnly, ký HMAC) – bé mở là chơi ngay. Server chặn mọi API khi chưa đăng nhập.
+- Mã băm bằng scrypt; sai 5 lần ⇒ khoá 5 phút. Khu phụ huynh → Cài đặt → *Gia đình*: đổi tên, đổi mã (máy khác phải đăng nhập lại), *Đăng xuất mọi máy khác*, *Thoát gia đình trên máy này*.
+- **Quên mã gia đình?** Ở màn hình đăng nhập chọn *Đăng nhập bằng PIN phụ huynh* (tên + PIN) rồi đặt mã mới.
+- Dữ liệu cũ trước khi có nhiều gia đình được chuyển thành gia đình **"Gia đình 1"** (giữ PIN, mã, kẹo, lịch sử) – nên đổi tên trong khu phụ huynh.
 
 - Lối vào: biểu tượng ổ khoá nhỏ, mờ ở góc header – phải **giữ 1,5 giây** mới mở (bàn phím: nhấn Enter 3 lần). Truy cập thẳng `/phu-huynh` vẫn phải qua cổng PIN.
 - Lần đầu: thiết lập PIN 4–6 số, kèm một phép nhân "dành cho người lớn".
@@ -286,13 +291,11 @@ Toàn bộ API gom vào **một** Vercel Function (`api/router.ts`) để nằm 
 - Kiểm tra mọi dữ liệu đầu vào bằng Zod; lỗi nội bộ không lộ chi tiết ra ngoài.
 - Header bảo mật (`X-Frame-Options`, `nosniff`, ...) cấu hình trong `vercel.json`.
 
-**Quên PIN?** Mở `npm run db:studio` (hoặc SQL Editor của Neon) và chạy:
+**Quên cả PIN lẫn mã gia đình?** Người quản lý mở `npm run db:studio` (hoặc SQL Editor của Neon) và chạy (thay tên gia đình):
 ```sql
-UPDATE app_settings SET pin_hash = NULL, session_version = session_version + 1 WHERE id = 1;
--- Tắt luôn mã gia đình nếu cũng quên:
-UPDATE app_settings SET family_code_hash = NULL, family_version = family_version + 1 WHERE id = 1;
+UPDATE families SET pin_hash = NULL, session_version = session_version + 1 WHERE name = 'Nhà Tuệ Anh';
 ```
-Sau đó vào khu vực phụ huynh để tạo PIN mới. Dữ liệu học tập không bị ảnh hưởng.
+Gia đình chưa có PIN thì đăng nhập bằng tên + mã gia đình, rồi vào khu phụ huynh để tạo PIN mới. Nếu quên cả mã: chạy thêm `UPDATE families SET code_hash = NULL, family_version = family_version + 1 WHERE name = '...'` – khi đó đăng nhập chỉ cần tên, hãy đặt mã mới ngay. Dữ liệu học tập không bị ảnh hưởng.
 
 ## 10. Sao lưu & khôi phục JSON
 

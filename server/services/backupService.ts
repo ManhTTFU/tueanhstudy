@@ -3,13 +3,16 @@
  *  - File JSON có `format` + `schemaVersion` để nâng cấp về sau (xem upgradeBackup).
  *  - Nhập dữ liệu: kiểm tra cấu trúc + ràng buộc tham chiếu TRƯỚC, sau đó ghi đè
  *    toàn bộ trong MỘT transaction (lỗi giữa chừng => không thay đổi gì).
- *  - Mã PIN và khoá bí mật KHÔNG bao giờ được xuất ra file.
+ *  - Mã PIN, mã gia đình và khoá bí mật KHÔNG bao giờ được xuất ra file.
+ *  - Mỗi gia đình chỉ xuất / nhập / xoá dữ liệu CỦA MÌNH. Khi nhập, mã phiên học và
+ *    hộp quà được cấp mới (nhập file của gia đình khác cũng không đụng dữ liệu của họ).
  */
-import { asc } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  appSettings,
   chapterProgress,
+  families,
   giftOpenings,
   progress,
   quizAnswers,
@@ -18,8 +21,7 @@ import {
 } from '../../db/schema.js';
 import type { Database } from '../db.js';
 import { unprocessable } from '../errors.js';
-import { getSettingsRow } from './settingsService.js';
-import { eq } from 'drizzle-orm';
+import { getFamilyRow } from './settingsService.js';
 
 export const BACKUP_FORMAT = 'be-vui-hoc-toan-backup';
 export const BACKUP_SCHEMA_VERSION = 1;
@@ -180,14 +182,33 @@ export function validateBackup(raw: unknown): BackupFile {
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
-export async function exportBackup(db: Database, now = new Date()): Promise<BackupFile> {
-  const [p] = await db.select().from(progress);
-  const chapters = await db.select().from(chapterProgress).orderBy(asc(chapterProgress.chapterId));
-  const sessions = await db.select().from(quizSessions).orderBy(asc(quizSessions.startedAt));
-  const answers = await db.select().from(quizAnswers).orderBy(asc(quizAnswers.sessionId), asc(quizAnswers.questionIndex));
-  const rewardRows = await db.select().from(rewards).orderBy(asc(rewards.id));
-  const gifts = await db.select().from(giftOpenings).orderBy(asc(giftOpenings.openedAt));
-  const settings = await getSettingsRow(db);
+export async function exportBackup(db: Database, familyId: string, now = new Date()): Promise<BackupFile> {
+  const [p] = await db.select().from(progress).where(eq(progress.familyId, familyId));
+  const chapters = await db
+    .select()
+    .from(chapterProgress)
+    .where(eq(chapterProgress.familyId, familyId))
+    .orderBy(asc(chapterProgress.chapterId));
+  const sessions = await db
+    .select()
+    .from(quizSessions)
+    .where(eq(quizSessions.familyId, familyId))
+    .orderBy(asc(quizSessions.startedAt));
+  const sessionIds = sessions.map((x) => x.id);
+  const answers = sessionIds.length
+    ? await db
+        .select()
+        .from(quizAnswers)
+        .where(inArray(quizAnswers.sessionId, sessionIds))
+        .orderBy(asc(quizAnswers.sessionId), asc(quizAnswers.questionIndex))
+    : [];
+  const rewardRows = await db.select().from(rewards).where(eq(rewards.familyId, familyId)).orderBy(asc(rewards.id));
+  const gifts = await db
+    .select()
+    .from(giftOpenings)
+    .where(eq(giftOpenings.familyId, familyId))
+    .orderBy(asc(giftOpenings.openedAt));
+  const settings = await getFamilyRow(db, familyId);
 
   const answersBySession = new Map<string, typeof answers>();
   for (const a of answers) {
@@ -260,20 +281,21 @@ export async function exportBackup(db: Database, now = new Date()): Promise<Back
   };
 }
 
-/** Xoá toàn bộ dữ liệu học tập (giữ nguyên mã PIN & cài đặt bảo mật). */
-async function clearLearningData(tx: Database): Promise<void> {
-  await tx.delete(rewards);
-  await tx.delete(giftOpenings);
-  await tx.delete(quizAnswers);
-  await tx.delete(quizSessions);
-  await tx.delete(chapterProgress);
-  await tx.delete(progress);
+/** Xoá toàn bộ dữ liệu học tập CỦA GIA ĐÌNH (giữ nguyên tên, mã, PIN & cài đặt). */
+async function clearLearningData(tx: Database, familyId: string): Promise<void> {
+  // quiz_answers tự xoá theo quiz_sessions (ON DELETE CASCADE).
+  await tx.delete(rewards).where(eq(rewards.familyId, familyId));
+  await tx.delete(giftOpenings).where(eq(giftOpenings.familyId, familyId));
+  await tx.delete(quizSessions).where(eq(quizSessions.familyId, familyId));
+  await tx.delete(chapterProgress).where(eq(chapterProgress.familyId, familyId));
+  await tx.delete(progress).where(eq(progress.familyId, familyId));
 }
 
-export async function resetAllData(db: Database): Promise<void> {
+export async function resetAllData(db: Database, familyId: string): Promise<void> {
   await db.transaction(async (tx) => {
-    await clearLearningData(tx);
-    await tx.insert(progress).values({ id: 1 });
+    await getFamilyRow(tx, familyId, true);
+    await clearLearningData(tx, familyId);
+    await tx.insert(progress).values({ familyId });
   });
 }
 
@@ -282,16 +304,24 @@ async function insertChunked<T>(items: T[], insert: (chunk: T[]) => Promise<unkn
   for (let i = 0; i < items.length; i += CHUNK) await insert(items.slice(i, i + CHUNK));
 }
 
-export async function importBackup(db: Database, raw: unknown): Promise<{ sessions: number; rewards: number }> {
+export async function importBackup(db: Database, familyId: string, raw: unknown): Promise<{ sessions: number; rewards: number }> {
   const backup = validateBackup(raw);
   const { data } = backup;
+  // Cấp mã mới cho phiên học & hộp quà: mã cũ có thể đang được gia đình khác dùng.
+  const sessionIdMap = new Map(data.sessions.map((x) => [x.id, randomUUID()]));
+  const giftIdMap = new Map(data.giftOpenings.map((g) => [g.id, randomUUID()]));
+  const remapKey = (key: string) =>
+    key.replace(/^(session:)([0-9a-f-]{36})/i, (m, p1: string, id: string) => (sessionIdMap.has(id) ? p1 + sessionIdMap.get(id) : m))
+      .replace(/^(gift:)([0-9a-f-]{36})/i, (m, p1: string, id: string) => (giftIdMap.has(id) ? p1 + giftIdMap.get(id) : m));
   await db.transaction(async (tx) => {
-    await clearLearningData(tx);
-    await tx.insert(progress).values({ id: 1, ...data.progress });
+    await getFamilyRow(tx, familyId, true);
+    await clearLearningData(tx, familyId);
+    await tx.insert(progress).values({ familyId, ...data.progress });
     await insertChunked(data.chapterProgress, (chunk) =>
       tx.insert(chapterProgress).values(
         chunk.map((c) => ({
           ...c,
+          familyId,
           learnedAt: c.learnedAt ? new Date(c.learnedAt) : null,
           lastPlayedAt: c.lastPlayedAt ? new Date(c.lastPlayedAt) : null,
           completedAt: c.completedAt ? new Date(c.completedAt) : null,
@@ -301,7 +331,8 @@ export async function importBackup(db: Database, raw: unknown): Promise<{ sessio
     await insertChunked(data.sessions, (chunk) =>
       tx.insert(quizSessions).values(
         chunk.map((s) => ({
-          id: s.id,
+          id: sessionIdMap.get(s.id)!,
+          familyId,
           chapterId: s.chapterId,
           chapterName: s.chapterName,
           status: 'completed',
@@ -317,19 +348,29 @@ export async function importBackup(db: Database, raw: unknown): Promise<{ sessio
         })),
       ),
     );
-    const answerRows = data.sessions.flatMap((s) => s.answers.map((a) => ({ ...a, sessionId: s.id })));
+    const answerRows = data.sessions.flatMap((s) => s.answers.map((a) => ({ ...a, sessionId: sessionIdMap.get(s.id)! })));
     await insertChunked(answerRows, (chunk) => tx.insert(quizAnswers).values(chunk));
     await insertChunked(data.giftOpenings, (chunk) =>
-      tx.insert(giftOpenings).values(chunk.map((g) => ({ ...g, openedAt: new Date(g.openedAt) }))),
+      tx.insert(giftOpenings).values(
+        chunk.map((g) => ({ ...g, id: giftIdMap.get(g.id)!, familyId, openedAt: new Date(g.openedAt) })),
+      ),
     );
     await insertChunked(data.rewards, (chunk) =>
-      tx.insert(rewards).values(chunk.map((r) => ({ ...r, earnedAt: new Date(r.earnedAt) }))),
+      tx.insert(rewards).values(
+        chunk.map((r) => ({
+          ...r,
+          familyId,
+          dedupeKey: remapKey(r.dedupeKey),
+          sourceSessionId: r.sourceSessionId ? sessionIdMap.get(r.sourceSessionId)! : null,
+          sourceGiftId: r.sourceGiftId ? giftIdMap.get(r.sourceGiftId)! : null,
+          earnedAt: new Date(r.earnedAt),
+        })),
+      ),
     );
-    await getSettingsRow(tx);
     await tx
-      .update(appSettings)
+      .update(families)
       .set({ soundEnabled: data.settings.soundEnabled, reducedMotion: data.settings.reducedMotion, updatedAt: new Date() })
-      .where(eq(appSettings.id, 1));
+      .where(eq(families.id, familyId));
   });
   return { sessions: data.sessions.length, rewards: data.rewards.length };
 }
