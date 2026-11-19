@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm run dev            # Vite dev server on :5173, serves frontend AND /api (dev/apiPlugin.ts)
+DATABASE_URL= PGLITE_DIR=/tmp/x npm run dev   # force a throwaway local PGlite even if .env.local points at Neon
 npm run build          # tsc --noEmit && vite build -> dist/ (hashed bundles go in dist/static/)
 npm run typecheck
 npm test               # vitest run (tests/**/*.test.ts, node environment)
@@ -34,6 +35,8 @@ No linter is configured. `.env.local` is loaded by vite.config.ts, drizzle.confi
 
 ### One quiz engine, many chapters
 - A chapter is a `ChapterDefinition` (`src/engine/types.ts`) registered in `src/chapters/registry.ts`. It holds the id, theme, range, quiz config, reward config, `enabled` flag and a `QuestionGenerator` built with `createQuestionGenerator` (which handles de-duplication). Its UI is registered separately in `src/chapters/ui-registry.tsx` (`QuestionView`, `Illustration`, `promptVoice`, optional `Learning` stage).
+- A chapter with `parentId` is a sub-game (e.g. `number-finding` → "Tìm số" under `number-recognition`): it is hidden from the home page (`getHomeChapters`) and offered in the game picker that opens when "Chơi ngay" is tapped on its parent's intro page (`getSubGames`; labels from the optional `game` field). It is otherwise a normal chapter with its own sessions, progress and rewards.
+- Levels: a chapter's optional `level` groups games inside a root chapter (`src/chapters/levels.ts`). "Làm quen mặt số" has level 1 (1–10: `number-recognition`, `number-finding`) and levels 2–10 (11–20 … 91–100), generated from `LEVEL_STICKERS` in `src/chapters/number-recognition/levels.ts` (cards up to `MAX_NUMBER` in `src/data/numbers/numbers.ts`). Level N unlocks when every game of level N-1 has bestScore ≥ `LEVEL_UNLOCK_MIN_SCORE` (8). `startSession` enforces this (403 `level_locked`); the intro page only displays it (`?cap=N` selects the level).
 - `QuizPage` + `useQuiz` (`src/features/quiz/`) are generic and must stay chapter-agnostic. Home, intro and learning pages iterate the registries. To add a chapter, add these files and registry entries; do not branch on a chapter id in shared code.
 - `QuizSession.ts` is a pure state machine (`answering → correct|wrong → … → finished`). Input is ignored outside `answering`, which prevents double taps from counting. Tried wrong options are dimmed.
 - **Scoring uses the first attempt only.** A wrong first try counts as incorrect even after the child retries correctly.
@@ -49,6 +52,7 @@ No linter is configured. `.env.local` is loaded by vite.config.ts, drizzle.confi
 - `api/router.ts` (the only Vercel Function) adapts `VercelRequest` to `ApiRequest`. `vercel.json` rewrites `/api/:path*` to `/api/router?route=:path*`. Add new endpoints to the route table; do not create more files in `api/`, because the free Hobby plan limits how many Functions a deployment can have.
 - Every non-GET request needs the header `X-BVHT-Client: 1` (CSRF guard). `src/services/api.ts` adds it automatically.
 - Parent auth: the PIN is hashed with scrypt; the session is an HttpOnly, SameSite=Strict cookie `bvht_parent` holding an HMAC token that is checked against `app_settings.session_version`. Five wrong PINs lock login for 5 minutes (stored in the database).
+- Family code (`server/familyAuth.ts`): when `app_settings.family_code_hash` is set, `handleApiRequest` rejects every route not marked `open: true` with `401 family_required` unless the `bvht_family` cookie (HMAC, domain-separated from the parent token, checked against `family_version`) is valid; parent-only routes also pass with a valid parent token, and PIN login issues the family cookie too (recovery path). `FamilyGate` (src/features/family) shows the keypad and listens for the `bvht:family-required` event dispatched by `src/services/api.ts`; `/phu-huynh` is never gated.
 - The DB connection (`server/db.ts`) is a `pg` Pool from `DATABASE_URL`. `setDatabase()`, or passing `db` to `handleApiRequest`, injects PGlite instead. `dev/apiPlugin.ts` uses this when `DATABASE_URL` is unset, and the tests always do (`createPgliteDatabase()` with no directory = in-memory, migrations applied).
 
 ### Backup format

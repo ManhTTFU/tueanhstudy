@@ -5,11 +5,12 @@ import { numberRecognitionGenerator, NUMBER_RECOGNITION_TYPE, type NumberRecogni
 export const numberRecognitionChapter: ChapterDefinition<NumberRecognitionPayload> = {
   id: 'number-recognition',
   name: 'Làm quen mặt số',
-  description: 'Bé học nhận biết các con số từ 1 đến 10.',
+  description: 'Bé học nhận biết các con số từ 1 đến 100.',
   icon: 'hash',
   theme: { primary: '#FF7BAC', soft: '#FFE3EE', strong: '#C2255C' },
   order: 1,
   enabled: true,
+  game: { name: 'Nhìn số', hint: 'Đây là số mấy?' },
   range: { min: 1, max: 10 },
   questionType: NUMBER_RECOGNITION_TYPE,
   quiz: { questionCount: 10, optionCount: 4, minDurationMs: 5_000 },

@@ -57,6 +57,18 @@ export interface ChapterDefinition<P = Record<string, unknown>> {
   theme: ChapterTheme;
   order: number;
   enabled: boolean;
+  /**
+   * Trò chơi phụ của một chương khác: không hiện ở trang chủ mà hiện thành
+   * nút chơi trong trang của chương cha (vẫn có bài, điểm, phần thưởng riêng).
+   */
+  parentId?: string;
+  /**
+   * Cấp độ trong nhóm chương (mặc định 1). Cấp N chỉ mở khi bé đạt đủ điểm
+   * ở mọi trò của cấp N-1 (xem src/chapters/levels.ts).
+   */
+  level?: number;
+  /** Tên + câu ví dụ hiển thị khi bé chọn trò chơi (chương có trò chơi phụ). */
+  game?: { name: string; hint: string };
   range: NumberRange;
   questionType: string;
   quiz: {

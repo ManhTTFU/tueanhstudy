@@ -179,6 +179,12 @@ export const appSettings = pgTable(
     sessionVersion: integer('session_version').notNull().default(1),
     failedPinAttempts: integer('failed_pin_attempts').notNull().default(0),
     pinLockedUntil: timestamp('pin_locked_until', { withTimezone: true }),
+    /** Mã gia đình (scrypt). NULL = chưa bật, ai có link cũng vào được. */
+    familyCodeHash: text('family_code_hash'),
+    /** Tăng khi đổi mã / "đăng xuất mọi máy" => các máy đã nhớ mã phải nhập lại. */
+    familyVersion: integer('family_version').notNull().default(1),
+    failedFamilyAttempts: integer('failed_family_attempts').notNull().default(0),
+    familyLockedUntil: timestamp('family_locked_until', { withTimezone: true }),
     updatedAt: updatedAt(),
   },
   (t) => [check('app_settings_singleton', sql`${t.id} = 1`)],

@@ -5,7 +5,7 @@
  *     trả lời đầu tiên, lưu kết quả + cộng thưởng trong MỘT transaction.
  *     Gọi lặp lại => trả về kết quả cũ, không cộng thưởng thêm.
  */
-import { and, count, eq, gt, lt, sql } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import {
   chapterProgress,
   progress,
@@ -15,13 +15,14 @@ import {
   type QuizSessionRow,
   type StoredQuestion,
 } from '../../db/schema.js';
+import { isChapterUnlocked, LEVEL_UNLOCK_MIN_SCORE, unlockRequirements } from '../../src/chapters/levels.js';
 import { getChapter } from '../../src/chapters/registry.js';
 import { encouragementFor } from '../../src/engine/messages.js';
 import { evaluateSubmission, generateQuiz, type SubmittedAnswer } from '../../src/engine/QuizEngine.js';
 import { computeSessionRewards, giftsAvailable } from '../../src/engine/RewardService.js';
 import type { Question, RewardGrant, Rng } from '../../src/engine/types.js';
 import type { Database } from '../db.js';
-import { ApiError, notFound, tooManyRequests, unprocessable } from '../errors.js';
+import { ApiError, forbidden, notFound, tooManyRequests, unprocessable } from '../errors.js';
 import { ensureProgressRow } from './progressService.js';
 
 /** Số phiên được mở tối đa trong 10 phút (chống gửi yêu cầu liên tục, bền vững trong DB). */
@@ -44,6 +45,21 @@ export async function startSession(
 ): Promise<StartedSession> {
   const chapter = getChapter(chapterId);
   if (!chapter || !chapter.enabled) throw notFound('Không tìm thấy chương học');
+
+  // Cấp chưa mở khoá: không cho bắt đầu bài (client chỉ hiển thị khoá, server mới chặn thật).
+  const required = unlockRequirements(chapter);
+  if (required.length > 0) {
+    const rows = await db
+      .select({ chapterId: chapterProgress.chapterId, bestScore: chapterProgress.bestScore })
+      .from(chapterProgress)
+      .where(inArray(chapterProgress.chapterId, required.map((c) => c.id)));
+    const best = (id: string) => rows.find((r) => r.chapterId === id)?.bestScore ?? 0;
+    if (!isChapterUnlocked(chapter, best)) {
+      throw forbidden('level_locked', `Bé cần đạt ${LEVEL_UNLOCK_MIN_SCORE} điểm ở các trò cấp trước để mở cấp này`, {
+        required: required.map((c) => ({ chapterId: c.id, bestScore: best(c.id) })),
+      });
+    }
+  }
 
   const [recent] = await db
     .select({ n: count() })

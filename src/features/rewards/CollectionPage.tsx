@@ -137,7 +137,15 @@ export function CollectionPage() {
               <Sparkles className="text-sunny-500" /> Album sticker ({owned.size}/{STICKERS.length})
             </h2>
             <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-7">
-              {STICKERS.map((s) => {
+              {/* Sticker bé đã có lên đầu (theo thứ tự nhận), sticker còn khoá xếp sau. */}
+              {[...STICKERS]
+                .sort((a, b) => {
+                  const ta = owned.get(a.code)?.firstEarnedAt;
+                  const tb = owned.get(b.code)?.firstEarnedAt;
+                  if (ta && tb) return ta.localeCompare(tb);
+                  return ta ? -1 : tb ? 1 : 0;
+                })
+                .map((s) => {
                 const have = owned.get(s.code);
                 return (
                   <div

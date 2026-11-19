@@ -22,4 +22,5 @@ export async function createPgliteDatabase(dataDir?: string): Promise<{ db: Data
   return { db: db as unknown as Database, close: () => client.close() };
 }
 
-export const LOCAL_DATA_DIR = join(import.meta.dirname, '..', '.data', 'pglite');
+/** Thư mục PGlite khi dev; đặt PGLITE_DIR để dùng database thử riêng. */
+export const LOCAL_DATA_DIR = process.env.PGLITE_DIR || join(import.meta.dirname, '..', '.data', 'pglite');

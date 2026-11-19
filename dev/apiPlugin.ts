@@ -43,7 +43,7 @@ export function devApiPlugin(): Plugin {
       localDb = (async () => {
         const mod = (await server.ssrLoadModule('/dev/localDb.ts')) as typeof import('./localDb.js');
         const { db } = await mod.createPgliteDatabase(mod.LOCAL_DATA_DIR);
-        server.config.logger.info('  ➜  API: dùng PGlite local tại .data/pglite (chưa có DATABASE_URL)');
+        server.config.logger.info(`  ➜  API: dùng PGlite local tại ${mod.LOCAL_DATA_DIR} (chưa có DATABASE_URL)`);
         return db;
       })();
     }

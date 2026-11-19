@@ -6,6 +6,7 @@ export interface PublicSettings {
   soundEnabled: boolean;
   reducedMotion: boolean;
   pinConfigured: boolean;
+  familyCodeEnabled: boolean;
 }
 
 /** Đảm bảo dòng cài đặt (id = 1) tồn tại rồi trả về. */
@@ -23,6 +24,7 @@ export function toPublicSettings(row: AppSettingsRow): PublicSettings {
     soundEnabled: row.soundEnabled,
     reducedMotion: row.reducedMotion,
     pinConfigured: row.pinHash !== null,
+    familyCodeEnabled: row.familyCodeHash !== null,
   };
 }
 

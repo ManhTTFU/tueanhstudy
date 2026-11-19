@@ -15,6 +15,8 @@ export class ApiClientError extends Error {
   }
 }
 
+export const FAMILY_REQUIRED_EVENT = 'bvht:family-required';
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -39,6 +41,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string; details?: unknown } } | null)?.error;
+    // Máy chưa nhập mã gia đình (hoặc mã vừa bị đổi) => báo cho FamilyGate hiện màn hình nhập mã.
+    if (res.status === 401 && err?.code === 'family_required') window.dispatchEvent(new Event(FAMILY_REQUIRED_EVENT));
     throw new ApiClientError(res.status, err?.code ?? 'error', err?.message ?? 'Có lỗi xảy ra', err?.details);
   }
   return data as T;
@@ -49,6 +53,7 @@ export interface PublicSettings {
   soundEnabled: boolean;
   reducedMotion: boolean;
   pinConfigured: boolean;
+  familyCodeEnabled: boolean;
 }
 
 export interface StickerCount {
@@ -191,6 +196,11 @@ export const api = {
 
   rewards: () => request<RewardsOverview>('GET', 'rewards'),
   openGift: (giftId: string) => request<GiftResult>('POST', 'rewards/gifts/open', { giftId }),
+
+  familyStatus: () => request<{ enabled: boolean; unlocked: boolean }>('GET', 'family/status'),
+  familyUnlock: (code: string) => request<{ unlocked: true }>('POST', 'family/unlock', { code }),
+  setFamilyCode: (code: string | null) => request<{ enabled: boolean }>('PUT', 'family/code', { code }),
+  familyLogoutAll: () => request<{ ok: true }>('POST', 'family/logout-all'),
 
   parentSession: () => request<{ pinConfigured: boolean; authenticated: boolean }>('GET', 'parent/session'),
   parentSetup: (pin: string) => request<{ authenticated: true }>('POST', 'parent/setup', { pin }),

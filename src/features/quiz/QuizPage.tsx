@@ -2,8 +2,10 @@
  * Màn hình làm bài – DÙNG CHUNG cho mọi chương.
  * Phần riêng của chương (QuestionView, giọng đọc) lấy từ ui-registry.
  */
-import { Volume2, WifiOff } from 'lucide-react';
+import { Lock, Volume2, WifiOff } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Navigate, useParams } from 'react-router-dom';
+import { chapterPagePath } from '../chapter/ChapterPages';
 import { getChapter } from '../../chapters/registry';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { Mascot } from '../../components/Mascot';
@@ -26,6 +28,24 @@ export function QuizPage() {
 function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
   const quiz = useQuiz(chapter, ui);
   const { state, stage, result } = quiz;
+  const navigate = useNavigate();
+
+  if (stage === 'locked') {
+    return (
+      <PageShell className="flex items-center justify-center">
+        <div className="card mt-16 flex max-w-md flex-col items-center gap-4 p-6 text-center" data-testid="quiz-locked">
+          <Mascot mood="thinking" size={130} />
+          <p className="flex items-center gap-2 text-3xl font-extrabold">
+            <Lock size={30} strokeWidth={3} /> Cấp này chưa mở
+          </p>
+          <p className="text-xl font-semibold text-ink/70">Bé chơi tốt cấp trước để mở cấp này nhé!</p>
+          <button type="button" className="kid-btn w-full bg-sunny-400 text-ink" onClick={() => navigate(chapterPagePath(chapter))}>
+            Quay lại
+          </button>
+        </div>
+      </PageShell>
+    );
+  }
 
   if (stage === 'celebrate' && result) {
     return <RewardCelebration result={result} onContinue={quiz.showResult} />;
@@ -58,7 +78,7 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
   return (
     <PageShell className="pb-32">
       <div className="mb-3 flex items-center gap-3">
-        <BackButton to={`/chuong/${chapter.id}`} />
+        <BackButton to={chapterPagePath(chapter)} />
         <div className="flex flex-1 flex-col gap-1">
           <ProgressBar value={state.currentIndex + (state.phase === 'correct' ? 1 : 0)} max={state.questions.length} color={chapter.theme.primary} label="Tiến độ bài" />
         </div>

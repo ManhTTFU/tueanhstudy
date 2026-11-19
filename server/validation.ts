@@ -43,6 +43,9 @@ export const pinSchema = z.string().regex(/^\d{4,6}$/, 'Mã PIN gồm 4–6 ch�
 
 export const setupPinSchema = z.object({ pin: pinSchema });
 export const loginSchema = z.object({ pin: pinSchema });
+export const familyCodeSchema = z.string().regex(/^\d{4,8}$/, 'Mã gia đình gồm 4–8 chữ số');
+export const familyUnlockSchema = z.object({ code: familyCodeSchema });
+export const setFamilyCodeSchema = z.object({ code: familyCodeSchema.nullable() });
 export const changePinSchema = z.object({ currentPin: pinSchema, newPin: pinSchema });
 
 export const settingsSchema = z

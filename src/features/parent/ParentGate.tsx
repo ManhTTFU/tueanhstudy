@@ -6,7 +6,7 @@ import { Delete, ShieldCheck } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { api } from '../../services/api';
 
-function Keypad({ value, onChange, max = 6 }: { value: string; onChange: (v: string) => void; max?: number }) {
+export function Keypad({ value, onChange, max = 6 }: { value: string; onChange: (v: string) => void; max?: number }) {
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'];
   return (
     <div className="grid w-full max-w-xs grid-cols-3 gap-3">
@@ -29,7 +29,7 @@ function Keypad({ value, onChange, max = 6 }: { value: string; onChange: (v: str
   );
 }
 
-function PinDots({ length, max = 6 }: { length: number; max?: number }) {
+export function PinDots({ length, max = 6 }: { length: number; max?: number }) {
   return (
     <div className="flex gap-3" aria-label={`Đã nhập ${length} chữ số`}>
       {Array.from({ length: max }, (_, i) => (

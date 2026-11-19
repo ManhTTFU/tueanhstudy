@@ -4,12 +4,16 @@
  *
  * Thêm chương mới = thêm 1 mục vào CHAPTER_UI (cùng id với registry.ts).
  */
-import { BookOpen, Hash, PawPrint, type LucideIcon } from 'lucide-react';
+import { BookOpen, Hash, PawPrint, Search, type LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { objectImage } from '../data/objects/catalog';
-import { VOICE_PHRASES, type VoiceLine } from '../data/voice';
+import { findNumberVoice, VOICE_PHRASES, type VoiceLine } from '../data/voice';
 import type { Question } from '../engine/types';
+import { FindingIllustration, FindingQuestionView } from './number-finding/components/FindingViews';
+import type { NumberFindingPayload } from './number-finding/generator';
 import { NumberFlashcards } from './number-recognition/components/NumberFlashcards';
+import { NUMBER_RECOGNITION_TYPE } from './number-recognition/generator';
+import { numberLevelChapters } from './number-recognition/levels';
 import { NumberIllustration, NumberQuestionView } from './number-recognition/components/NumberViews';
 import type { NumberRecognitionPayload } from './number-recognition/generator';
 import { CountingIllustration, CountingQuestionView } from './object-counting/components/CountingViews';
@@ -46,10 +50,27 @@ const objectCountingUI: ChapterUI<ObjectCountingPayload> = {
   preload: (qs) => qs.map((q) => objectImage(q.payload.objectId)),
 };
 
+const numberFindingUI: ChapterUI<NumberFindingPayload> = {
+  Icon: Search,
+  Illustration: FindingIllustration,
+  QuestionView: FindingQuestionView,
+  introVoice: VOICE_PHRASES.chapterNumberFinding,
+  promptVoice: (q) => findNumberVoice(q.payload.number),
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CHAPTER_UI: Record<string, ChapterUI<any>> = {
   'number-recognition': numberRecognitionUI,
   'object-counting': objectCountingUI,
+  'number-finding': numberFindingUI,
+  // Các cấp 11–20, ...: dùng lại giao diện cấp 1–10, thẻ học theo phạm vi của cấp.
+  ...Object.fromEntries(
+    numberLevelChapters.map((c) => {
+      if (c.questionType !== NUMBER_RECOGNITION_TYPE) return [c.id, numberFindingUI];
+      const View = ({ onFinished }: { onFinished: () => void }) => <NumberFlashcards onFinished={onFinished} range={c.range} />;
+      return [c.id, { ...numberRecognitionUI, Learning: { ...numberRecognitionUI.Learning!, View } }];
+    }),
+  ),
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

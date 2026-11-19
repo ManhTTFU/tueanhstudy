@@ -1,19 +1,23 @@
 /**
- * Giai đoạn A – học bằng thẻ số 1–10.
- * Chữ số lớn, chữ đọc, hình minh họa đúng số lượng, nút nghe đọc,
+ * Giai đoạn A – học bằng thẻ số (1–10, 11–20...).
+ * Chữ số lớn, chữ đọc, hình minh họa đúng số lượng (từ 11 trở đi hiển thị
+ * theo "chục và đơn vị"), nút nghe đọc,
  * chuyển thẻ trước/sau, thanh tiến độ, xem lại các thẻ đã học.
  */
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Gamepad2, Volume2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CountingGrid } from '../../../components/CountingGrid';
+import { TensFrame } from '../../../components/TensFrame';
 import { ProgressBar } from '../../../components/ui';
-import { NUMBER_CARDS } from '../../../data/numbers/numbers';
+import { numberCardsInRange } from '../../../data/numbers/numbers';
 import { getObject, objectImage } from '../../../data/objects/catalog';
 import { VOICE_PHRASES } from '../../../data/voice';
 import { AudioController } from '../../../features/audio/AudioController';
+import type { NumberRange } from '../../../engine/types';
 
-export function NumberFlashcards({ onFinished }: { onFinished: () => void }) {
+export function NumberFlashcards({ onFinished, range = { min: 1, max: 10 } }: { onFinished: () => void; range?: NumberRange }) {
+  const NUMBER_CARDS = useMemo(() => numberCardsInRange(range.min, range.max), [range.min, range.max]);
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [visited, setVisited] = useState<Set<number>>(() => new Set([0]));
@@ -22,7 +26,7 @@ export function NumberFlashcards({ onFinished }: { onFinished: () => void }) {
   const allVisited = visited.size === total;
 
   const speakCard = () => {
-    void AudioController.speak({ file: `cards/${card.value}`, text: `Số ${card.word}. ${card.caption}.` });
+    void AudioController.speak({ file: `cards/${card.value}`, text: `Số ${card.word.toLowerCase()}. ${card.caption}.` });
   };
 
   useEffect(() => {
@@ -76,7 +80,8 @@ export function NumberFlashcards({ onFinished }: { onFinished: () => void }) {
             <span className="font-extrabold leading-none" style={{ color: card.color, fontSize: 'clamp(7rem, 24vmin, 11rem)' }}>
               {card.value}
             </span>
-            {object && (
+            {object && card.value > 10 && <TensFrame value={card.value} image={objectImage(object.id)} alt={object.label} />}
+            {object && card.value <= 10 && (
               <CountingGrid
                 count={card.value}
                 image={objectImage(object.id)}

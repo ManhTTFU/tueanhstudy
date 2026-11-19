@@ -11,6 +11,7 @@ export class ApiError extends Error {
 
 export const badRequest = (message: string, details?: unknown) => new ApiError(400, 'bad_request', message, details);
 export const unauthorized = (message = 'Cần xác nhận phụ huynh') => new ApiError(401, 'unauthorized', message);
+export const forbidden = (code: string, message: string, details?: unknown) => new ApiError(403, code, message, details);
 export const notFound = (message = 'Không tìm thấy') => new ApiError(404, 'not_found', message);
 export const conflict = (message: string) => new ApiError(409, 'conflict', message);
 export const unprocessable = (message: string, details?: unknown) => new ApiError(422, 'invalid_data', message, details);

@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { Award, BookCheck, ChevronRight, Gift, Play, Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getEnabledChapters } from '../../chapters/registry';
+import { getHomeChapters } from '../../chapters/registry';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { AppHeader } from '../../components/AppHeader';
 import { PageShell, ProgressBar, Stars } from '../../components/ui';
@@ -17,7 +17,7 @@ import { AudioController } from '../audio/AudioController';
 
 export function HomePage() {
   const { data: summary, error } = useApiData(api.summary);
-  const chapters = getEnabledChapters();
+  const chapters = getHomeChapters();
   const navigate = useNavigate();
 
   return (

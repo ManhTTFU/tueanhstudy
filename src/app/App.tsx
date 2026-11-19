@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ChapterIntroPage, LearningPage } from '../features/chapter/ChapterPages';
+import { FamilyGate } from '../features/family/FamilyGate';
 import { HomePage } from '../features/home/HomePage';
 import { ParentPage } from '../features/parent/ParentPage';
 import { QuizPage } from '../features/quiz/QuizPage';
@@ -8,9 +9,10 @@ import { SettingsProvider } from './SettingsContext';
 
 export function App() {
   return (
-    <SettingsProvider>
-      <BrowserRouter>
-        <Routes>
+    <BrowserRouter>
+      <FamilyGate>
+        <SettingsProvider>
+          <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/chuong/:chapterId" element={<ChapterIntroPage />} />
           <Route path="/chuong/:chapterId/hoc" element={<LearningPage />} />
@@ -18,8 +20,9 @@ export function App() {
           <Route path="/bo-suu-tap" element={<CollectionPage />} />
           <Route path="/phu-huynh" element={<ParentPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </SettingsProvider>
+          </Routes>
+        </SettingsProvider>
+      </FamilyGate>
+    </BrowserRouter>
   );
 }

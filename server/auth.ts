@@ -35,7 +35,7 @@ export async function verifyPin(pin: string, stored: string): Promise<boolean> {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-async function getSecret(db: Database, row: AppSettingsRow): Promise<string> {
+export async function getSecret(db: Database, row: AppSettingsRow): Promise<string> {
   const fromEnv = process.env.PARENT_SESSION_SECRET;
   if (fromEnv && fromEnv.length >= 16) return fromEnv;
   if (row.sessionSecret) return row.sessionSecret;
@@ -44,7 +44,7 @@ async function getSecret(db: Database, row: AppSettingsRow): Promise<string> {
   return secret;
 }
 
-function sign(payload: string, secret: string): string {
+export function sign(payload: string, secret: string): string {
   return createHmac('sha256', secret).update(payload).digest('base64url');
 }
 

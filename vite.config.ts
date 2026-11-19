@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   // Nạp biến môi trường server (DATABASE_URL...) cho dev API. Chỉ biến VITE_* mới vào bundle frontend.
   const env = loadEnv(mode, process.cwd(), '');
   for (const key of ['DATABASE_URL', 'PARENT_SESSION_SECRET']) {
-    if (env[key] && !process.env[key]) process.env[key] = env[key];
+    if (env[key] && process.env[key] === undefined) process.env[key] = env[key]; // `DATABASE_URL= npm run dev` => ép dùng PGlite
   }
   return {
     plugins: [react(), devApiPlugin()],

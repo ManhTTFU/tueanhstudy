@@ -121,6 +121,8 @@ Nguyên tắc chính:
 - Đúng: Mochi vui, pháo hoa nhỏ, âm thanh + lời khen ngẫu nhiên, tự sang câu sau. Sai: Mochi buồn nhẹ, "Không sao, bé thử lại nhé!", âm thanh trầm nhẹ.
 - 10/10: pháo hoa lớn toàn màn hình, "HOAN HÔ! BÉ ĐÃ HOÀN THÀNH XUẤT SẮC!", +1 kẹo (cấu hình được), sticker lần đầu đạt 10/10 của chương.
 - Đủ **10 kẹo** ⇒ mở 1 hộp quà (kẹo được tích luỹ, không bị trừ) ⇒ nhận sticker ngẫu nhiên, ưu tiên sticker chưa có.
+- **Làm quen mặt số** có 10 cấp: **1–10, 11–20, …, 91–100**. Mỗi cấp có thẻ học và 2 trò chơi (bấm "Chơi ngay" để chọn): **Nhìn số** ("Đây là số mấy?") và **Tìm số** (nghe "Đâu là số năm?" rồi chọn). Từ 11 trở đi, thẻ dạy theo "chục và đơn vị" (mỗi chục là một khung 10 hình, cộng hình lẻ). Mỗi trò có sticker riêng khi đạt 10/10 lần đầu.
+- **Mở khoá cấp:** mỗi cấp mở khi bé đạt **ít nhất 8/10 ở cả hai trò** của cấp ngay trước (tính điểm cao nhất, chỉ cần đạt một lần). Server kiểm tra luật này (`403 level_locked`). Ngưỡng điểm: `LEVEL_UNLOCK_MIN_SCORE` trong `src/chapters/levels.ts`.
 - Chương 2: hình xếp lưới tự đổi bố cục theo số lượng (vd. 7 = 4+3), xuất hiện lần lượt; bé **chạm từng hình để đếm** (hình được đánh số và đọc to).
 
 ## 4. Cài đặt & chạy local
@@ -238,7 +240,7 @@ Local: đặt trong `.env.local` (đã gitignore). Vercel: Project Settings → 
 
 ## 8. REST API
 
-Tất cả nằm dưới `/api/`. Request ghi dữ liệu phải có header `X-BVHT-Client: 1` (chống CSRF). Lỗi trả về dạng `{ "error": { "code", "message", "details?" } }`.
+Tất cả nằm dưới `/api/`. Khi đã bật **mã gia đình**, mọi API (trừ các API ghi "mở" bên dưới) trả `401 family_required` nếu máy chưa nhập mã. Request ghi dữ liệu phải có header `X-BVHT-Client: 1` (chống CSRF). Lỗi trả về dạng `{ "error": { "code", "message", "details?" } }`.
 
 | Method | Đường dẫn | Quyền | Mô tả |
 |---|---|---|---|
@@ -251,6 +253,10 @@ Tất cả nằm dưới `/api/`. Request ghi dữ liệu phải có header `X-B
 | GET | `rewards` | – | Kẹo, sticker, số hộp quà mở được |
 | POST | `rewards/gifts/open` | – | `{giftId: uuid}` ⇒ mở hộp quà (idempotent theo `giftId`) |
 | GET / PUT | `settings` | – | Âm thanh, giảm chuyển động |
+| GET | `family/status` | mở | Mã gia đình có bật không, máy này đã nhập mã chưa |
+| POST | `family/unlock` | mở | `{code}` ⇒ nhập mã gia đình, máy được nhớ 1 năm |
+| PUT | `family/code` | Phụ huynh | `{code: "4–8 số" \| null}` ⇒ bật/đổi/tắt mã gia đình |
+| POST | `family/logout-all` | Phụ huynh | Mọi máy khác phải nhập lại mã |
 | GET | `parent/session` | – | PIN đã thiết lập chưa, đã xác nhận chưa |
 | POST | `parent/setup` · `parent/login` · `parent/logout` | – | Thiết lập PIN / đăng nhập / đăng xuất |
 | POST | `parent/change-pin` · `parent/logout-all` | Phụ huynh | Đổi PIN / thu hồi mọi phiên |
@@ -265,6 +271,12 @@ Toàn bộ API gom vào **một** Vercel Function (`api/router.ts`) để nằm 
 
 ## 9. Khu vực phụ huynh & bảo mật
 
+**Mã gia đình** (khoá cả ứng dụng với người ngoài, bé không cần đăng nhập):
+- Mặc định **tắt** – ai có link cũng vào được. Bật trong Khu phụ huynh → Cài đặt → *Mã gia đình* (4–8 chữ số).
+- Khi bật: máy lạ thấy màn hình nhập mã; nhập đúng thì máy được nhớ **1 năm** (cookie `bvht_family`, HttpOnly, ký HMAC). Server chặn mọi API khi chưa có mã, không chỉ ẩn giao diện.
+- Mã băm bằng scrypt; sai 5 lần ⇒ khoá 5 phút. Đổi mã hoặc bấm *Đăng xuất mọi máy khác* ⇒ các máy khác phải nhập lại (máy đang thao tác được giữ).
+- **Quên mã gia đình?** Vào `/phu-huynh` (luôn mở) và đăng nhập bằng PIN – máy đó được vào luôn, rồi đặt mã mới. Quên cả PIN: chạy SQL bên dưới và thêm `family_code_hash = NULL`.
+
 - Lối vào: biểu tượng ổ khoá nhỏ, mờ ở góc header – phải **giữ 1,5 giây** mới mở (bàn phím: nhấn Enter 3 lần). Truy cập thẳng `/phu-huynh` vẫn phải qua cổng PIN.
 - Lần đầu: thiết lập PIN 4–6 số, kèm một phép nhân "dành cho người lớn".
 - PIN băm bằng **scrypt + salt ngẫu nhiên**, không lưu văn bản thuần. Sai 5 lần ⇒ khoá 5 phút (lưu trong DB).
@@ -277,6 +289,8 @@ Toàn bộ API gom vào **một** Vercel Function (`api/router.ts`) để nằm 
 **Quên PIN?** Mở `npm run db:studio` (hoặc SQL Editor của Neon) và chạy:
 ```sql
 UPDATE app_settings SET pin_hash = NULL, session_version = session_version + 1 WHERE id = 1;
+-- Tắt luôn mã gia đình nếu cũng quên:
+UPDATE app_settings SET family_code_hash = NULL, family_version = family_version + 1 WHERE id = 1;
 ```
 Sau đó vào khu vực phụ huynh để tạo PIN mới. Dữ liệu học tập không bị ảnh hưởng.
 
@@ -301,9 +315,11 @@ Khi thay đổi định dạng: tăng `BACKUP_SCHEMA_VERSION` và thêm bước 
 
 ## 11. Thêm chương học mới
 
-Ví dụ thêm "Nhận biết số 11–20" (`number-recognition-20`):
+**Thêm cấp số mới (ví dụ 101–110):** tăng `MAX_NUMBER` trong `src/data/numbers/numbers.ts` (và bổ sung cách đọc trong `numberWord`), thêm 1 cặp sticker vào `LEVEL_STICKERS` trong `src/chapters/number-recognition/levels.ts` (khai báo trong `src/data/stickers.ts`), rồi chạy `npm run assets:images` và `npm run assets:voice`. Thẻ số, trang chương, khoá cấp, giao diện và API tự nhận cấp mới.
 
-1. **Tạo thư mục** `src/chapters/number-recognition-20/`.
+Ví dụ thêm một chương hoàn toàn mới (`my-chapter`):
+
+1. **Tạo thư mục** `src/chapters/my-chapter/`.
 2. **generator.ts** – tái sử dụng engine, chỉ mô tả cách tạo 1 câu (với chương nhận biết số có thể dùng lại `numberRecognitionGenerator`):
    ```ts
    import { createQuestionGenerator } from '../../engine/QuestionGenerator.js';

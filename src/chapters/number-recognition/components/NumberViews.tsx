@@ -44,7 +44,11 @@ export function NumberQuestionView({ question }: { question: Question<NumberReco
         style={{ width: 'clamp(11rem, 38vmin, 18rem)', border: `10px solid ${color}33` }}
         data-testid="number-display"
       >
-        <span className="font-extrabold leading-none" style={{ color, fontSize: 'clamp(7rem, 26vmin, 12rem)' }}>
+        <span
+          className="font-extrabold leading-none"
+          // Số có 3 chữ số (100) thu nhỏ lại để nằm gọn trong vòng tròn.
+          style={{ color, fontSize: n >= 100 ? 'clamp(4.5rem, 16vmin, 7.5rem)' : 'clamp(7rem, 26vmin, 12rem)' }}
+        >
           {n}
         </span>
       </motion.div>

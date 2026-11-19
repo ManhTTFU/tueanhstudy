@@ -4,7 +4,7 @@
  * chỉ cần giữ nguyên tên file).
  */
 import { OBJECTS } from './objects/catalog.js';
-import { NUMBER_CARDS, numberWord } from './numbers/numbers.js';
+import { MAX_NUMBER, NUMBER_CARDS, findNumberPrompt, numberWord } from './numbers/numbers.js';
 import { PRAISES, PERFECT_MESSAGE, TRY_AGAIN_MESSAGE } from '../engine/messages.js';
 
 export interface VoiceLine {
@@ -27,6 +27,8 @@ export const VOICE_PHRASES = {
   resultTry: { file: 'phrases/result-try', text: 'Bé đã rất cố gắng! Cùng luyện tập thêm nhé!' },
   chapterNumberRecognition: { file: 'phrases/chapter-number-recognition', text: 'Làm quen mặt số' },
   chapterObjectCounting: { file: 'phrases/chapter-object-counting', text: 'Bé tập đếm' },
+  levelLocked: { file: 'phrases/level-locked', text: 'Bé đạt tám điểm ở cả hai trò chơi của cấp trước để mở cấp này nhé!' },
+  chapterNumberFinding: { file: 'phrases/chapter-number-finding', text: 'Tìm số. Bé nghe và chọn đúng con số nhé!' },
 } satisfies Record<string, VoiceLine>;
 
 export type VoicePhraseKey = keyof typeof VOICE_PHRASES;
@@ -35,12 +37,17 @@ export function praiseVoice(index: number): VoiceLine {
   return { file: `praise/${index}`, text: PRAISES[index] ?? PRAISES[0] };
 }
 
+export function findNumberVoice(n: number): VoiceLine {
+  return { file: `questions/find-${n}`, text: findNumberPrompt(n) };
+}
+
 export function allVoiceLines(): VoiceLine[] {
   return [
     ...Object.values(VOICE_PHRASES),
     ...PRAISES.map((text, i) => ({ file: `praise/${i}`, text })),
-    ...Array.from({ length: 11 }, (_, n) => ({ file: `numbers/${n}`, text: numberWord(n) })),
+    ...Array.from({ length: MAX_NUMBER + 1 }, (_, n) => ({ file: `numbers/${n}`, text: numberWord(n) })),
     ...NUMBER_CARDS.map((c) => ({ file: `cards/${c.value}`, text: `Số ${c.word.toLowerCase()}. ${c.caption}.` })),
+    ...NUMBER_CARDS.map((c) => findNumberVoice(c.value)),
     ...OBJECTS.map((x) => ({ file: `questions/count-${x.id}`, text: `Có bao nhiêu ${x.label}?` })),
   ];
 }

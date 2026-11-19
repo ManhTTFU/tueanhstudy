@@ -19,11 +19,11 @@ import {
   type QuizSessionState,
 } from '../../engine/QuizSession';
 import type { AnswerValue, Question } from '../../engine/types';
-import { api } from '../../services/api';
+import { api, ApiClientError } from '../../services/api';
 import { AnimationController } from '../animation/AnimationController';
 import { AudioController } from '../audio/AudioController';
 
-export type QuizStage = 'loading' | 'playing' | 'submitting' | 'celebrate' | 'result';
+export type QuizStage = 'loading' | 'playing' | 'submitting' | 'celebrate' | 'result' | 'locked';
 
 export const FEEDBACK_CORRECT_MS = 1700;
 export const FEEDBACK_WRONG_MS = 1700;
@@ -63,7 +63,12 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
       sessionId = started.sessionId;
       questions = started.questions;
       setOffline(false);
-    } catch {
+    } catch (e) {
+      // Cấp chưa mở khoá (server chặn): không cho chơi ngoại tuyến để lách luật.
+      if (e instanceof ApiClientError && e.status === 403) {
+        if (myRun === runId.current) setStage('locked');
+        return;
+      }
       // Ngoại tuyến / lỗi máy chủ: bé vẫn chơi được, nhưng kết quả không được lưu.
       questions = generateQuiz(chapter) as Question[];
       setOffline(true);

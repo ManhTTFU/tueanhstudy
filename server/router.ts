@@ -18,6 +18,16 @@ import {
   setupPin,
 } from './auth.js';
 import { getDb, type Database } from './db.js';
+import {
+  buildFamilyCookie,
+  bumpFamilyVersion,
+  checkFamilyCode,
+  FAMILY_COOKIE,
+  familyRequired,
+  hasFamilyAccess,
+  issueFamilyToken,
+  setFamilyCode,
+} from './familyAuth.js';
 import { ApiError, badRequest, notFound } from './errors.js';
 import { checkRateLimit, type RateLimitName } from './rateLimit.js';
 import { exportBackup, importBackup, resetAllData } from './services/backupService.js';
@@ -29,6 +39,8 @@ import { bumpSessionVersion, getPublicSettings, updateSettings } from './service
 import {
   changePinSchema,
   completeQuizSchema,
+  familyUnlockSchema,
+  setFamilyCodeSchema,
   historyQuerySchema,
   learningCompleteSchema,
   loginSchema,
@@ -69,6 +81,8 @@ interface Route {
   method: 'GET' | 'POST' | 'PUT';
   pattern: RegExp;
   parent?: boolean;
+  /** Không cần mã gia đình (kiểm tra sức khoẻ, mở khoá, đăng nhập phụ huynh). */
+  open?: boolean;
   limit?: RateLimitName;
   handler: (ctx: Context) => Promise<ApiResponse>;
 }
@@ -79,6 +93,7 @@ const routes: Route[] = [
   {
     method: 'GET',
     pattern: /^health$/,
+    open: true,
     handler: async ({ db }) => {
       await db.execute(sql`select 1`);
       return ok({ ok: true, database: 'connected', time: new Date().toISOString() });
@@ -155,10 +170,55 @@ const routes: Route[] = [
     handler: async ({ db, req }) => ok(await updateSettings(db, parseBody(settingsSchema, req.body))),
   },
 
+  // ---------- Mã gia đình ----------
+  {
+    method: 'GET',
+    pattern: /^family\/status$/,
+    open: true,
+    handler: async ({ db, cookies }) => {
+      const settings = await getPublicSettings(db);
+      return ok({ enabled: settings.familyCodeEnabled, unlocked: await hasFamilyAccess(db, cookies[FAMILY_COOKIE]) });
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^family\/unlock$/,
+    open: true,
+    limit: 'auth',
+    handler: async ({ db, req }) => {
+      const { code } = parseBody(familyUnlockSchema, req.body);
+      await checkFamilyCode(db, code);
+      return ok({ unlocked: true }, { 'Set-Cookie': buildFamilyCookie(await issueFamilyToken(db), req.secure) });
+    },
+  },
+  {
+    method: 'PUT',
+    pattern: /^family\/code$/,
+    parent: true,
+    limit: 'auth',
+    handler: async ({ db, req }) => {
+      const { code } = parseBody(setFamilyCodeSchema, req.body);
+      await setFamilyCode(db, code);
+      // Máy đang thao tác vẫn giữ quyền vào; các máy khác phải nhập mã mới.
+      const cookie = code === null ? buildFamilyCookie(null, req.secure) : buildFamilyCookie(await issueFamilyToken(db), req.secure);
+      return ok({ enabled: code !== null }, { 'Set-Cookie': cookie });
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^family\/logout-all$/,
+    parent: true,
+    handler: async ({ db, req }) => {
+      await bumpFamilyVersion(db);
+      return ok({ ok: true }, { 'Set-Cookie': buildFamilyCookie(await issueFamilyToken(db), req.secure) });
+    },
+  },
+
   // ---------- Phụ huynh ----------
   {
     method: 'GET',
     pattern: /^parent\/session$/,
+    open: true,
     handler: async ({ db, cookies }) => {
       const settings = await getPublicSettings(db);
       return ok({
@@ -174,24 +234,24 @@ const routes: Route[] = [
     handler: async ({ db, req }) => {
       const { pin } = parseBody(setupPinSchema, req.body);
       await setupPin(db, pin);
-      const token = await issueToken(db);
-      return ok({ authenticated: true }, { 'Set-Cookie': buildCookie(token, req.secure) });
+      return ok({ authenticated: true }, { 'Set-Cookie': await parentLoginCookies(db, req.secure) });
     },
   },
   {
     method: 'POST',
     pattern: /^parent\/login$/,
+    open: true,
     limit: 'auth',
     handler: async ({ db, req }) => {
       const { pin } = parseBody(loginSchema, req.body);
       await checkPinWithLockout(db, pin);
-      const token = await issueToken(db);
-      return ok({ authenticated: true }, { 'Set-Cookie': buildCookie(token, req.secure) });
+      return ok({ authenticated: true }, { 'Set-Cookie': await parentLoginCookies(db, req.secure) });
     },
   },
   {
     method: 'POST',
     pattern: /^parent\/logout$/,
+    open: true,
     handler: async ({ req }) => ok({ authenticated: false }, { 'Set-Cookie': buildCookie(null, req.secure) }),
   },
   {
@@ -265,6 +325,11 @@ const routes: Route[] = [
   },
 ];
 
+/** Phụ huynh đăng nhập (PIN) => nhận cả cookie phụ huynh lẫn cookie gia đình (khôi phục khi quên mã). */
+async function parentLoginCookies(db: Database, secure: boolean): Promise<string[]> {
+  return [buildCookie(await issueToken(db), secure), buildFamilyCookie(await issueFamilyToken(db), secure)];
+}
+
 function parseUuid(value: string | undefined): string {
   const r = uuidSchema.safeParse(value);
   if (!r.success) throw notFound('Không tìm thấy');
@@ -291,6 +356,10 @@ export async function handleApiRequest(req: ApiRequest, db?: Database): Promise<
 
     const database = db ?? getDb();
     const cookies = parseCookies(req.headers.cookie);
+    if (!route.open && !(await hasFamilyAccess(database, cookies[FAMILY_COOKIE]))) {
+      // Máy lạ: chỉ được vào khi nhập mã gia đình, hoặc là phụ huynh đã đăng nhập bằng PIN.
+      if (!route.parent || !(await isTokenValid(database, cookies[PARENT_COOKIE]))) throw familyRequired();
+    }
     if (route.parent) await requireParent(database, cookies[PARENT_COOKIE]);
 
     const params = route.pattern.exec(path)?.slice(1) ?? [];

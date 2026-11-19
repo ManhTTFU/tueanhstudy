@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CHAPTERS, getChapter } from '../src/chapters/registry';
+import { getLevels, isChapterUnlocked, LEVEL_UNLOCK_MIN_SCORE } from '../src/chapters/levels';
+import { CHAPTERS, getChapter, getHomeChapters, getSubGames } from '../src/chapters/registry';
 import { numberRecognitionChapter } from '../src/chapters/number-recognition/config';
 import { objectCountingChapter } from '../src/chapters/object-counting/config';
-import { NUMBER_CARDS } from '../src/data/numbers/numbers';
+import { findNumberPrompt, NUMBER_CARDS, numberWord } from '../src/data/numbers/numbers';
 import { OBJECTS, getObject } from '../src/data/objects/catalog';
 import { STICKERS } from '../src/data/stickers';
 import { generateNumericOptions, areOptionsValid } from '../src/engine/AnswerGenerator';
@@ -42,16 +43,108 @@ function play(state: QuizSessionState, wrongFirst: number): QuizSessionState {
 }
 
 describe('Hệ thống đăng ký chương', () => {
-  it('có đúng 2 chương được bật, đúng mã chương', () => {
-    expect(CHAPTERS.filter((c) => c.enabled).map((c) => c.id)).toEqual(['number-recognition', 'object-counting']);
+  it('các chương được bật, đúng mã chương; trang chủ chỉ hiện 2 chương gốc', () => {
+    const levelIds = Array.from({ length: 9 }, (_, i) => [`number-recognition-${i * 10 + 11}-${i * 10 + 20}`, `number-finding-${i * 10 + 11}-${i * 10 + 20}`]).flat();
+    expect(CHAPTERS.filter((c) => c.enabled).map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'number-finding', ...levelIds]);
+    expect(getHomeChapters().map((c) => c.id)).toEqual(['number-recognition', 'object-counting']);
+    expect(getSubGames('number-recognition').map((c) => c.id)).toEqual(['number-finding', ...levelIds]);
     expect(getChapter('number-recognition')).toBe(numberRecognitionChapter);
     expect(getChapter('khong-ton-tai')).toBeUndefined();
   });
 });
 
+describe('Đọc số tiếng Việt', () => {
+  it('đọc đúng các trường hợp đặc biệt', () => {
+    expect(numberWord(5)).toBe('Năm');
+    expect(numberWord(10)).toBe('Mười');
+    expect(numberWord(11)).toBe('Mười một');
+    expect(numberWord(14)).toBe('Mười bốn');
+    expect(numberWord(15)).toBe('Mười lăm');
+    expect(numberWord(20)).toBe('Hai mươi');
+    expect(numberWord(21)).toBe('Hai mươi mốt');
+    expect(numberWord(24)).toBe('Hai mươi tư');
+    expect(numberWord(25)).toBe('Hai mươi lăm');
+    expect(numberWord(30)).toBe('Ba mươi');
+    expect(numberWord(99)).toBe('Chín mươi chín');
+    expect(numberWord(41)).toBe('Bốn mươi mốt');
+    expect(numberWord(55)).toBe('Năm mươi lăm');
+    expect(numberWord(100)).toBe('Một trăm');
+    expect(findNumberPrompt(15)).toBe('Đâu là số mười lăm?');
+  });
+
+  it('thẻ 11–100 dạy theo chục và đơn vị', () => {
+    expect(NUMBER_CARDS.find((c) => c.value === 47)).toMatchObject({ word: 'Bốn mươi bảy', caption: 'Bốn chục và bảy' });
+    expect(NUMBER_CARDS.find((c) => c.value === 90)).toMatchObject({ caption: 'Chín chục' });
+    expect(NUMBER_CARDS.find((c) => c.value === 100)).toMatchObject({ word: 'Một trăm', caption: 'Mười chục là một trăm' });
+    expect(NUMBER_CARDS.find((c) => c.value === 13)).toMatchObject({ word: 'Mười ba', caption: 'Một chục và ba' });
+    expect(NUMBER_CARDS.find((c) => c.value === 20)).toMatchObject({ word: 'Hai mươi', caption: 'Hai chục' });
+  });
+});
+
+describe('Cấp độ & mở khoá', () => {
+  const scores = (map: Record<string, number>) => (id: string) => map[id] ?? 0;
+
+  it('Làm quen mặt số có 10 cấp từ 1–10 đến 91–100, mỗi cấp 2 trò (Nhìn số trước Tìm số)', () => {
+    const levels = getLevels('number-recognition');
+    expect(levels.map((l) => l.label)).toEqual(['1–10', '11–20', '21–30', '31–40', '41–50', '51–60', '61–70', '71–80', '81–90', '91–100']);
+    expect(levels[0]!.games.map((g) => g.id)).toEqual(['number-recognition', 'number-finding']);
+    expect(levels[1]!.games.map((g) => g.id)).toEqual(['number-recognition-11-20', 'number-finding-11-20']);
+    for (const l of levels) expect(l.games.map((g) => g.game?.name)).toEqual(['Nhìn số', 'Tìm số']);
+    // Sticker 10/10 lần đầu của mọi trò đều khác nhau.
+    const stickers = levels.flatMap((l) => l.games.map((g) => g.rewards.firstPerfectSticker));
+    expect(new Set(stickers).size).toBe(stickers.length);
+    expect(getLevels('object-counting')).toHaveLength(1);
+  });
+
+  it('cấp 1 luôn mở; cấp 11–20 cần >= 8 điểm ở CẢ HAI trò cấp 1–10', () => {
+    const lv2 = getChapter('number-finding-11-20')!;
+    expect(isChapterUnlocked(getChapter('number-finding')!, scores({}))).toBe(true);
+    expect(isChapterUnlocked(lv2, scores({}))).toBe(false);
+    expect(isChapterUnlocked(lv2, scores({ 'number-recognition': 10 }))).toBe(false);
+    expect(isChapterUnlocked(lv2, scores({ 'number-recognition': 10, 'number-finding': 7 }))).toBe(false);
+    expect(isChapterUnlocked(lv2, scores({ 'number-recognition': LEVEL_UNLOCK_MIN_SCORE, 'number-finding': LEVEL_UNLOCK_MIN_SCORE }))).toBe(true);
+    // Mỗi cấp chỉ phụ thuộc cấp ngay trước: 91–100 cần 81–90, không cần đạt lại 1–10.
+    const lv10 = getChapter('number-recognition-91-100')!;
+    expect(isChapterUnlocked(lv10, scores({ 'number-recognition-81-90': 8, 'number-finding-81-90': 9 }))).toBe(true);
+    expect(isChapterUnlocked(lv10, scores({ 'number-recognition-81-90': 8, 'number-finding-81-90': 7, 'number-recognition': 10, 'number-finding': 10 }))).toBe(false);
+  });
+
+  it('câu hỏi mỗi cấp chỉ dùng số trong cấp, mỗi số 1 lần, có giọng đọc', () => {
+    for (const level of getLevels('number-recognition')) {
+      for (const chapter of level.games) {
+        const { min, max } = chapter.range;
+        const qs = generateQuiz(chapter);
+        expect(qs.map((q) => q.correctAnswer).sort((a, b) => a - b)).toEqual(Array.from({ length: 10 }, (_, i) => i + min));
+        for (const q of qs) for (const o of q.options) expect(o >= min && o <= max).toBe(true);
+      }
+    }
+    for (let n = 1; n <= 100; n++) {
+      expect(existsSync(join(PUBLIC, `assets/sounds/cards/${n}.m4a`))).toBe(true);
+      expect(existsSync(join(PUBLIC, `assets/sounds/numbers/${n}.m4a`))).toBe(true);
+      expect(existsSync(join(PUBLIC, `assets/sounds/questions/find-${n}.m4a`))).toBe(true);
+    }
+  });
+});
+
+describe('Trò chơi phụ – Tìm số', () => {
+  it('hỏi "Đâu là số ...?", 10 câu không trùng, đáp án nằm trong 4 phương án, có giọng đọc', () => {
+    const chapter = getChapter('number-finding')!;
+    const qs = chapter.generator.generate({ rng: Math.random, count: 10, range: chapter.range, optionCount: 4 });
+    expect(new Set(qs.map((q) => q.payload.number)).size).toBe(10);
+    for (const q of qs) {
+      expect(q.correctAnswer).toBe(q.payload.number);
+      expect(q.options).toHaveLength(4);
+      expect(q.options.filter((o) => o === q.correctAnswer)).toHaveLength(1);
+      expect(q.prompt).toMatch(/^Đâu là số .+\?$/);
+      expect(existsSync(join(PUBLIC, `assets/sounds/questions/find-${q.payload.number}.m4a`))).toBe(true);
+    }
+    expect(qs.find((q) => q.payload.number === 5)!.prompt).toBe('Đâu là số năm?');
+  });
+});
+
 describe('Chương 1 – Làm quen mặt số', () => {
-  it('có đủ 10 thẻ số 1–10, có hình minh họa và âm thanh', () => {
-    expect(NUMBER_CARDS.map((c) => c.value)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  it('có đủ 100 thẻ số 1–100, có hình minh họa và âm thanh', () => {
+    expect(NUMBER_CARDS.map((c) => c.value)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
     for (const card of NUMBER_CARDS) {
       expect(getObject(card.objectId)).toBeDefined();
       expect(existsSync(join(PUBLIC, `assets/sounds/numbers/${card.value}.m4a`))).toBe(true);

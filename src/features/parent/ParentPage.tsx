@@ -310,6 +310,7 @@ function SettingsTab({ guard }: { guard: Guard }) {
           <Toggle label="Giảm chuyển động (tắt pháo hoa, hiệu ứng nhảy)" checked={settings.reducedMotion} onChange={settings.setReducedMotion} />
         </div>
       </Panel>
+      <FamilyCodePanel guard={guard} />
       <Panel title="Đổi mã PIN">
         <form
           className="flex flex-col gap-2 sm:flex-row"
@@ -334,6 +335,98 @@ function SettingsTab({ guard }: { guard: Guard }) {
         {msg && <p className="mt-2 font-semibold">{msg}</p>}
       </Panel>
     </div>
+  );
+}
+
+/** Mã gia đình: khoá cả ứng dụng với máy lạ. Máy đang dùng luôn được giữ quyền vào. */
+function FamilyCodePanel({ guard }: { guard: Guard }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [code, setCode] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .familyStatus()
+      .then((s) => setEnabled(s.enabled))
+      .catch(() => setEnabled(false));
+  }, []);
+
+  const run = async (fn: () => Promise<unknown>, okText: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await guard(fn);
+      setMsg({ ok: true, text: okText });
+      setCode('');
+      setConfirm('');
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Có lỗi xảy ra' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = () => {
+    if (!/^\d{4,8}$/.test(code)) return setMsg({ ok: false, text: 'Mã gia đình gồm 4–8 chữ số.' });
+    if (code !== confirm) return setMsg({ ok: false, text: 'Hai lần nhập mã không khớp.' });
+    void run(async () => {
+      await api.setFamilyCode(code);
+      setEnabled(true);
+    }, 'Đã lưu mã gia đình. Máy này được giữ, các máy khác cần nhập mã mới.');
+  };
+
+  return (
+    <Panel title="Mã gia đình">
+      <p className="mb-3 text-ink/70">
+        {enabled === null
+          ? 'Đang tải...'
+          : enabled
+            ? 'Đang BẬT: máy lạ phải nhập mã gia đình mới vào được ứng dụng. Mỗi máy chỉ cần nhập 1 lần (ghi nhớ 1 năm).'
+            : 'Đang TẮT: ai có đường link cũng vào chơi được. Bật mã để chặn người ngoài.'}
+      </p>
+      <form
+        className="flex flex-col gap-2 sm:flex-row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
+        <input className="parent-input" type="password" inputMode="numeric" placeholder={enabled ? 'Mã mới (4–8 số)' : 'Mã gia đình (4–8 số)'} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} maxLength={8} autoComplete="new-password" data-testid="family-code-input" />
+        <input className="parent-input" type="password" inputMode="numeric" placeholder="Nhập lại mã" value={confirm} onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))} maxLength={8} autoComplete="new-password" data-testid="family-code-confirm" />
+        <button type="submit" className="rounded-xl bg-grape-500 px-5 py-3 font-bold text-white" disabled={busy} data-testid="family-code-save">
+          {enabled ? 'Đổi mã' : 'Bật mã'}
+        </button>
+      </form>
+      {enabled && (
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            className="rounded-xl bg-ink/10 px-4 py-3 font-bold"
+            disabled={busy}
+            onClick={() => void run(api.familyLogoutAll, 'Đã đăng xuất mọi máy khác. Các máy đó cần nhập lại mã.')}
+          >
+            Đăng xuất mọi máy khác
+          </button>
+          <button
+            type="button"
+            className="rounded-xl bg-bubblegum-100 px-4 py-3 font-bold text-bubblegum-500"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm('Tắt mã gia đình? Ai có đường link cũng sẽ vào được ứng dụng.')) return;
+              void run(async () => {
+                await api.setFamilyCode(null);
+                setEnabled(false);
+              }, 'Đã tắt mã gia đình.');
+            }}
+          >
+            Tắt mã
+          </button>
+        </div>
+      )}
+      {msg && <p className={`mt-2 font-semibold ${msg.ok ? 'text-mint-500' : 'text-bubblegum-500'}`}>{msg.text}</p>}
+    </Panel>
   );
 }
 

@@ -67,6 +67,8 @@ describe('API cơ bản', () => {
     expect((chapters.body as { chapters: { id: string }[] }).chapters.map((c) => c.id)).toEqual([
       'number-recognition',
       'object-counting',
+      'number-finding',
+      ...Array.from({ length: 9 }, (_, i) => [`number-recognition-${i * 10 + 11}-${i * 10 + 20}`, `number-finding-${i * 10 + 11}-${i * 10 + 20}`]).flat(),
     ]);
     const summary = await call('GET', 'summary');
     expect(summary.body).toMatchObject({ totals: { totalCandies: 0, totalCompletedQuizzes: 0 }, overallProgress: 0 });
@@ -156,7 +158,8 @@ describe('Luồng làm bài + phần thưởng', () => {
     const summary = (await call('GET', 'summary')).body as { chapters: { chapterId: string; stars: number; bestScore: number }[]; overallProgress: number };
     const nr = summary.chapters.find((c) => c.chapterId === 'number-recognition')!;
     expect(nr).toMatchObject({ stars: 3, bestScore: 10 });
-    expect(summary.overallProgress).toBe(100);
+    // 2/21 bài đạt 3 sao ("Tìm số" và 18 trò cấp 11–100 chưa chơi) => 6/63 sao ≈ 10%.
+    expect(summary.overallProgress).toBe(10);
   });
 
   it('hộp quà: chưa đủ kẹo => 409; đủ kẹo mở 1 lần, gọi lặp cùng giftId không mở thêm', async () => {
@@ -297,5 +300,156 @@ describe('Khu vực phụ huynh & bảo mật', () => {
     const r = await call('PUT', 'settings', { soundEnabled: false });
     expect(r.body).toMatchObject({ soundEnabled: false });
     expect((await call('GET', 'settings')).body).toMatchObject({ soundEnabled: false, pinConfigured: true });
+  });
+});
+
+describe('Khoá cấp độ (cơ sở dữ liệu riêng, bắt đầu từ trống)', () => {
+  it('cấp 11–20 bị server chặn tới khi đạt >= 8 điểm ở cả hai trò cấp 1–10', async () => {
+    const fresh = await createPgliteDatabase();
+    const callFresh = (path: string, body: unknown) =>
+      handleApiRequest(
+        { method: 'POST', path, query: {}, headers: { 'x-bvht-client': '1' }, body, ip: `10.9.0.${++ipCounter % 250}`, secure: true },
+        fresh.db,
+      );
+    const playFresh = async (chapterId: string, wrongOnFirst: number) => {
+      const start = await callFresh('quiz/sessions', { chapterId });
+      expect(start.status).toBe(200);
+      const { sessionId, questions } = start.body as { sessionId: string; questions: Question[] };
+      await fresh.db
+        .update(quizSessions)
+        .set({ startedAt: sql`${quizSessions.startedAt} - interval '60 seconds'` })
+        .where(eq(quizSessions.id, sessionId));
+      const answers = questions.map((q, i) => ({
+        questionId: q.id,
+        attempts: i < wrongOnFirst ? [q.options.find((o) => o !== q.correctAnswer)!, q.correctAnswer] : [q.correctAnswer],
+      }));
+      return callFresh(`quiz/sessions/${sessionId}/complete`, { answers });
+    };
+    try {
+      const locked = await callFresh('quiz/sessions', { chapterId: 'number-recognition-11-20' });
+      expect(locked.status).toBe(403);
+      expect(locked.body).toMatchObject({ error: { code: 'level_locked' } });
+
+      expect((await playFresh('number-recognition', 1)).body).toMatchObject({ score: 9 });
+      expect((await callFresh('quiz/sessions', { chapterId: 'number-finding-11-20' })).status).toBe(403);
+      expect((await playFresh('number-finding', 3)).body).toMatchObject({ score: 7 });
+      expect((await callFresh('quiz/sessions', { chapterId: 'number-finding-11-20' })).status).toBe(403);
+      expect((await playFresh('number-finding', 2)).body).toMatchObject({ score: 8 });
+
+      const done = await playFresh('number-recognition-11-20', 0);
+      expect(done.body).toMatchObject({ score: 10, candiesEarned: 1 });
+      expect((done.body as { rewards: { rewardCode: string }[] }).rewards.map((r) => r.rewardCode)).toContain('sports-medal');
+      expect((await playFresh('number-finding-11-20', 0)).body).toMatchObject({ score: 10 });
+    } finally {
+      await fresh.close();
+    }
+  });
+});
+
+describe('Trò chơi phụ "Tìm số"', () => {
+  it('trò "Tìm số" dùng chung bộ máy, câu hỏi "Đâu là số ...?", tặng sticker kính lúp khi 10/10', async () => {
+    const p = await playQuiz('number-finding');
+    expect(p.complete.body).toMatchObject({ score: 10, candiesEarned: 1 });
+    const stickers = (p.complete.body as { rewards: { rewardCode: string }[] }).rewards.map((r) => r.rewardCode);
+    expect(stickers).toContain('magnifier');
+  });
+});
+
+describe('Mã gia đình (cơ sở dữ liệu riêng)', () => {
+  it('chưa bật thì mở; bật rồi thì máy lạ bị chặn, nhập đúng mã thì vào được', async () => {
+    const fresh = await createPgliteDatabase();
+    /** Mỗi "máy" có hũ cookie riêng. */
+    const device = () => {
+      const jar: Record<string, string> = {};
+      return async (method: string, path: string, body?: unknown) => {
+        const res = await handleApiRequest(
+          {
+            method,
+            path,
+            query: {},
+            headers: {
+              'x-bvht-client': '1',
+              cookie: Object.entries(jar)
+                .map(([k, v]) => `${k}=${v}`)
+                .join('; '),
+            },
+            body,
+            ip: `10.8.0.${++ipCounter % 250}`,
+            secure: true,
+          },
+          fresh.db,
+        );
+        const set = res.headers?.['Set-Cookie'];
+        for (const c of Array.isArray(set) ? set : set ? [set] : []) {
+          const [pair] = c.split(';');
+          const [k, v] = pair!.split('=');
+          if (v) jar[k!] = v;
+          else delete jar[k!];
+        }
+        return res;
+      };
+    };
+    try {
+      const parent = device();
+      const stranger = device();
+
+      // Chưa bật: ai cũng vào được.
+      expect((await stranger('GET', 'summary')).status).toBe(200);
+      expect((await stranger('GET', 'family/status')).body).toEqual({ enabled: false, unlocked: true });
+
+      // Phụ huynh đặt PIN rồi bật mã gia đình (chỉ phụ huynh mới đặt được).
+      expect((await stranger('PUT', 'family/code', { code: '123456' })).status).toBe(401);
+      expect((await parent('POST', 'parent/setup', { pin: '2468' })).status).toBe(200);
+      expect((await parent('PUT', 'family/code', { code: '12' })).status).toBe(400);
+      expect((await parent('PUT', 'family/code', { code: '123456' })).body).toEqual({ enabled: true });
+      const rows = await fresh.db.execute(sql`select family_code_hash from app_settings where id = 1`);
+      expect((rows as unknown as { rows: { family_code_hash: string }[] }).rows[0]!.family_code_hash).toMatch(/^scrypt\$/);
+
+      // Máy phụ huynh vẫn dùng được; máy lạ bị chặn mọi API trừ health/status/unlock.
+      expect((await parent('GET', 'summary')).status).toBe(200);
+      const blocked = await stranger('POST', 'quiz/sessions', { chapterId: 'number-recognition' });
+      expect(blocked.status).toBe(401);
+      expect(blocked.body).toMatchObject({ error: { code: 'family_required' } });
+      expect((await stranger('GET', 'summary')).status).toBe(401);
+      expect((await stranger('GET', 'health')).status).toBe(200);
+      expect((await stranger('GET', 'family/status')).body).toEqual({ enabled: true, unlocked: false });
+
+      // Token giả không qua được.
+      const forged = await handleApiRequest(
+        { method: 'GET', path: 'summary', query: {}, headers: { cookie: 'bvht_family=eyJmIjoyLCJleHAiOjk5OTk5OTk5OTk5OTl9.fake' }, body: null, ip: '10.8.1.1', secure: true },
+        fresh.db,
+      );
+      expect(forged.status).toBe(401);
+
+      // Sai mã: báo còn mấy lần; đúng mã: vào được và được nhớ.
+      expect((await stranger('POST', 'family/unlock', { code: '000000' })).body).toMatchObject({ error: { code: 'wrong_family_code' } });
+      expect((await stranger('POST', 'family/unlock', { code: '123456' })).status).toBe(200);
+      expect((await stranger('GET', 'summary')).status).toBe(200);
+
+      // Cookie gia đình KHÔNG dùng được làm cookie phụ huynh.
+      expect((await stranger('GET', 'history')).status).toBe(401);
+
+      // Đăng xuất mọi máy: máy lạ phải nhập lại, máy phụ huynh vẫn giữ.
+      expect((await parent('POST', 'family/logout-all')).status).toBe(200);
+      expect((await stranger('GET', 'summary')).status).toBe(401);
+      expect((await parent('GET', 'summary')).status).toBe(200);
+
+      // Máy mới quên mã: phụ huynh đăng nhập bằng PIN là vào được (khôi phục).
+      const newDevice = device();
+      expect((await newDevice('GET', 'summary')).status).toBe(401);
+      expect((await newDevice('POST', 'parent/login', { pin: '2468' })).status).toBe(200);
+      expect((await newDevice('GET', 'summary')).status).toBe(200);
+
+      // Sai 5 lần => khoá 5 phút, kể cả khi nhập đúng.
+      const attacker = device();
+      for (let i = 0; i < 5; i++) await attacker('POST', 'family/unlock', { code: '999999' });
+      expect((await attacker('POST', 'family/unlock', { code: '123456' })).status).toBe(423);
+
+      // Tắt mã: mở lại cho mọi máy.
+      expect((await parent('PUT', 'family/code', { code: null })).body).toEqual({ enabled: false });
+      expect((await stranger('GET', 'summary')).status).toBe(200);
+    } finally {
+      await fresh.close();
+    }
   });
 });
