@@ -17,14 +17,16 @@ npm test               # vitest run (tests/**/*.test.ts, node environment)
 npx vitest run tests/api.test.ts            # single file
 npx vitest run -t "không cộng trùng"        # single test, matched by name
 npm run db:generate    # after editing db/schema.ts -> new SQL in db/migrations/
-npm run db:migrate     # migrates DATABASE_URL, or local PGlite (.data/pglite) when unset
+npm run db:migrate     # migrates DATABASE_URL_UNPOOLED || DATABASE_URL (Neon!), or local PGlite (.data/pglite) when both unset
 npm run db:studio
 npm run assets:images  # download missing Fluent Emoji SVGs for the object/sticker catalogs
 npm run assets:voice   # generate missing Vietnamese voice .m4a (macOS `say -v Linh` only)
 npm run assets:sfx     # regenerate synthesized WAV effects
 ```
 
-No linter is configured. `.env.local` is loaded by vite.config.ts, drizzle.config.ts and scripts/migrate.ts.
+No linter is configured. `.env.local` is loaded by vite.config.ts, drizzle.config.ts and scripts/migrate.ts. `assets:voice` exits on non-macOS (e.g. this Windows machine): any new spoken prompt then has no `.m4a` and `tests/engine.test.ts` fails until the file is generated on a Mac or recorded by hand.
+
+Tests use in-memory PGlite with all migrations applied, so they never touch Neon. `tests/migration.test.ts` replays only the first N migrations (trimmed `_journal.json`), seeds old-shape data, then applies the rest; add a case there for any migration that transforms existing rows.
 
 ## Architecture
 
@@ -49,14 +51,14 @@ No linter is configured. `.env.local` is loaded by vite.config.ts, drizzle.confi
 - `POST /api/quiz/sessions`: the server generates the questions (`generateQuiz`) and stores them in `quiz_sessions.questions` (jsonb).
 - `POST /api/quiz/sessions/:id/complete`: the client sends only `{questionId, attempts[]}`. `evaluateSubmission` validates the attempts against the stored questions and recomputes the score, and enforces `minDurationMs`. Everything runs in **one transaction** (`server/services/quizService.ts`): `SELECT … FOR UPDATE` on the session; an already-completed session returns the old result with `rewards: []`.
 - Reward idempotency is enforced in the database: `(family_id, dedupe_key)` is UNIQUE (`session:<id>:candy`, `achievement:<code>`, `gift:<giftId>`), inserted with `ON CONFLICT DO NOTHING`. Gift opening is idempotent on a client-generated UUID (`gift_openings.id`). Candies accumulate and are never spent: available gifts = `floor(totalCandies / candiesPerGift) - giftsOpened`.
-- `progress` is one row per family (`ensureProgressRow(db, familyId)`); `app_settings` is a single global row (`getGlobalSettingsRow`); per-family settings come from `getFamilyRow`.
+- `progress` is one row per family (`ensureProgressRow(db, familyId)`); `app_settings` is a single global row (`getGlobalSettingsRow`, only the HMAC secret); everything per-family (settings, PIN, versions, lockouts) comes from `getFamilyRow`.
 
 ### API layer
 - `server/router.ts` defines a platform-independent `handleApiRequest(ApiRequest, db?) → ApiResponse` with a regex route table. Each route can set a rate-limit bucket and a `parent: true` auth flag.
 - `api/router.ts` (the only Vercel Function) adapts `VercelRequest` to `ApiRequest`. `vercel.json` rewrites `/api/:path*` to `/api/router?route=:path*`. Add new endpoints to the route table; do not create more files in `api/`, because the free Hobby plan limits how many Functions a deployment can have.
 - Every non-GET request needs the header `X-BVHT-Client: 1` (CSRF guard). `src/services/api.ts` adds it automatically.
-- Parent auth: the PIN is hashed with scrypt; the session is an HttpOnly, SameSite=Strict cookie `bvht_parent` holding an HMAC token that is checked against `app_settings.session_version`. Five wrong PINs lock login for 5 minutes (stored in the database).
-- Multi-family (`server/familyAuth.ts`): every learning table carries `family_id` (FK to `families`, which also holds name, code hash, PIN hash, versions, lockouts and sound/motion settings); `progress` has one row per family (PK `family_id`); `app_settings` only keeps the global HMAC secret. `handleApiRequest` resolves `familyId` from the `bvht_family` cookie and passes it to every non-`open` handler; services must always filter by it (never trust ids from the client). Login is name (normalized, no diacritics) + family code, or name + parent PIN. Registering a family needs `FAMILY_INVITE_CODE` except for the very first family; capped by `MAX_FAMILIES` (10). Parent tokens embed `fid` and only work for that family. `FamilyGate` (src/features/family) shows login/register and listens for the `bvht:family-required` event dispatched by `src/services/api.ts`. Backup import re-issues session/gift UUIDs so one family's file never collides with another family's rows.
+- Parent auth: the PIN is hashed with scrypt; the session is an HttpOnly, SameSite=Strict cookie `bvht_parent` holding an HMAC token (`{fid, v, exp}`) whose `v` is checked against `families.session_version` (`bumpSessionVersion` logs out all devices). Five wrong PINs (or family codes) lock that family's login for 5 minutes, tracked in `families.failed_*_attempts` / `*_locked_until`.
+- Multi-family (`server/familyAuth.ts`): every learning table carries `family_id` (FK to `families`, which also holds name, code hash, PIN hash, versions, lockouts and sound/motion settings). `handleApiRequest` resolves `familyId` from the `bvht_family` cookie and passes it to every non-`open` handler; services must always filter by it (never trust ids from the client). Login is name (normalized, no diacritics) + family code, or name + parent PIN. Registering a family needs `FAMILY_INVITE_CODE` except for the very first family; capped by `MAX_FAMILIES` (10). Parent tokens embed `fid` and only work for that family. `FamilyGate` (src/features/family) shows login/register and listens for the `bvht:family-required` event dispatched by `src/services/api.ts`. Backup import re-issues session/gift UUIDs so one family's file never collides with another family's rows.
 - The DB connection (`server/db.ts`) is a `pg` Pool from `DATABASE_URL`. `setDatabase()`, or passing `db` to `handleApiRequest`, injects PGlite instead. `dev/apiPlugin.ts` uses this when `DATABASE_URL` is unset, and the tests always do (`createPgliteDatabase()` with no directory = in-memory, migrations applied).
 
 ### Backup format

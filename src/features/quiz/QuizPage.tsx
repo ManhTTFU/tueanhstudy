@@ -123,9 +123,10 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
           </span>
         </button>
 
-        <QuestionView key={question.id} question={question} />
+        {/* Key phải khác nhau giữa 2 phần tử cùng cấp, nếu trùng React giữ lại hình của câu cũ. */}
+        <QuestionView key={`view-${question.id}`} question={question} />
 
-        <DelayedReveal key={question.id} delayMs={ui.optionsDelayMs?.(question) ?? 0}>
+        <DelayedReveal key={`options-${question.id}`} delayMs={ui.optionsDelayMs?.(question) ?? 0}>
           <AnswerOptions
             options={question.options}
             correctAnswer={question.correctAnswer}
