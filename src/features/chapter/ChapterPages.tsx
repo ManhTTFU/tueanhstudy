@@ -12,7 +12,7 @@ import {
   unlockRequirements,
   type ChapterLevel,
 } from '../../chapters/levels';
-import { getChapter, type AnyChapter } from '../../chapters/registry';
+import { getChapter, getHubChapters, type AnyChapter } from '../../chapters/registry';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { Mascot } from '../../components/Mascot';
 import { BackButton, PageShell } from '../../components/ui';
@@ -20,6 +20,7 @@ import { VOICE_PHRASES } from '../../data/voice';
 import { useApiData } from '../../hooks/useApiData';
 import { api } from '../../services/api';
 import { AudioController } from '../audio/AudioController';
+import { TopicShelf } from './TopicShelf';
 
 function useChapterParams() {
   const { chapterId = '' } = useParams();
@@ -75,7 +76,7 @@ export function ChapterIntroPage() {
 
   return (
     <PageShell>
-      <BackButton to="/" />
+      <BackButton to={chapter.hubId ? `/chuong/${chapter.hubId}` : '/'} />
       <motion.div
         className="card mx-auto mt-4 flex max-w-2xl flex-col items-center gap-4 overflow-hidden pb-6 text-center"
         initial={{ opacity: 0, y: 20 }}
@@ -90,6 +91,9 @@ export function ChapterIntroPage() {
         </h1>
         <p className="px-4 text-2xl font-semibold text-ink/70">{chapter.description}</p>
 
+        {/* Chương "cửa vào" (hubOnly) không có bài: chỉ hiện các chủ đề bên dưới. */}
+        {!chapter.hubOnly && (
+          <>
         {levels.length > 1 && (
           <div className="flex w-full flex-wrap justify-center gap-2 px-6" role="tablist" aria-label="Chọn cấp độ">
             {levels.map((level) => {
@@ -116,6 +120,12 @@ export function ChapterIntroPage() {
               );
             })}
           </div>
+        )}
+
+        {games.length === 1 && games[0]!.game.game && levels.length > 1 && (
+          <p className="px-4 text-xl font-bold" style={{ color: chapter.theme.strong }} data-testid="level-name">
+            {current.label}: {games[0]!.game.game.name}
+          </p>
         )}
 
         <AnimatePresence mode="wait" initial={false}>
@@ -196,7 +206,11 @@ export function ChapterIntroPage() {
             </motion.div>
           )}
         </AnimatePresence>
+          </>
+        )}
       </motion.div>
+
+      {getHubChapters(chapter.id).length > 0 && <TopicShelf topics={getHubChapters(chapter.id)} summary={summary} title={chapter.hubOnly ? 'Bé chọn chủ đề nhé' : 'Hoặc chọn chủ đề'} />}
     </PageShell>
   );
 }
@@ -204,7 +218,7 @@ export function ChapterIntroPage() {
 /** Cấp đang khoá: nói rõ cần đạt bao nhiêu điểm ở trò nào, bé đang được bao nhiêu. */
 function LockedPanel({ level, bestScoreOf }: { level: ChapterLevel; bestScoreOf: (id: string) => number }) {
   const required = unlockRequirements(level.games[0]!);
-  const prevLabel = required[0] ? `${required[0].range.min}–${required[0].range.max}` : '';
+  const prevLabel = getLevels(groupRootId(level.games[0]!)).filter((l) => l.level < level.level).pop()?.label ?? '';
   return (
     <motion.div
       className="mx-6 flex flex-col items-center gap-3 rounded-4xl bg-ink/5 p-4"
@@ -217,7 +231,7 @@ function LockedPanel({ level, bestScoreOf }: { level: ChapterLevel; bestScoreOf:
         <Lock size={28} strokeWidth={3} /> Cấp {level.label} đang khoá
       </p>
       <p className="text-xl font-semibold text-ink/70">
-        Bé đạt {LEVEL_UNLOCK_MIN_SCORE} điểm ở cả hai trò của cấp {prevLabel} để mở nhé!
+        Bé đạt {LEVEL_UNLOCK_MIN_SCORE} điểm ở {required.length > 1 ? 'cả hai trò' : 'trò'} của cấp {prevLabel} để mở nhé!
       </p>
       <ul className="flex w-full flex-col gap-2">
         {required.map((game) => {

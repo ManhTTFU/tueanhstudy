@@ -30,7 +30,9 @@ export function validateQuestionSet(
   if (questions.length !== expectedCount) return `cần ${expectedCount} câu, có ${questions.length}`;
   if (new Set(questions.map((q) => q.id)).size !== questions.length) return 'có câu hỏi trùng nhau';
   for (const q of questions) {
-    if (!areOptionsValid(q.options, q.correctAnswer, optionCount)) {
+    // Số phương án: 2..optionCount (vd. "con nào to hơn?" chỉ có 2 lựa chọn).
+    const n = q.options.length;
+    if (n < 2 || n > optionCount || !areOptionsValid(q.options, q.correctAnswer, n)) {
       return `câu ${q.id} có phương án không hợp lệ`;
     }
   }

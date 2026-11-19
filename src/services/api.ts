@@ -176,6 +176,9 @@ export interface SessionDetail extends Omit<HistoryItem, 'completedAt'> {
     correctAnswer: number;
     selectedAnswer: number;
     attemptHistory: number[];
+    /** Tên hình khi câu trả lời là hình (null nếu là số). */
+    correctLabel: string | null;
+    selectedLabel: string | null;
     isCorrect: boolean;
     attempts: number;
   }[];

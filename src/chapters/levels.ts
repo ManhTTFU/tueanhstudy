@@ -39,7 +39,7 @@ export function getLevels(rootId: string): ChapterLevel[] {
     .map(([level, games]) => {
       const sorted = games.sort((a, b) => a.order - b.order);
       const first = sorted[0]!;
-      return { level, label: `${first.range.min}–${first.range.max}`, games: sorted };
+      return { level, label: first.levelLabel ?? `${first.range.min}–${first.range.max}`, games: sorted };
     });
 }
 

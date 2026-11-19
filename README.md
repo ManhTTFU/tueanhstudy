@@ -123,6 +123,9 @@ Nguyên tắc chính:
 - Đủ **10 kẹo** ⇒ mở 1 hộp quà (kẹo được tích luỹ, không bị trừ) ⇒ nhận sticker ngẫu nhiên, ưu tiên sticker chưa có.
 - **Làm quen mặt số** có 10 cấp: **1–10, 11–20, …, 91–100**. Mỗi cấp có thẻ học và 2 trò chơi (bấm "Chơi ngay" để chọn): **Nhìn số** ("Đây là số mấy?") và **Tìm số** (nghe "Đâu là số năm?" rồi chọn). Từ 11 trở đi, thẻ dạy theo "chục và đơn vị" (mỗi chục là một khung 10 hình, cộng hình lẻ). Mỗi trò có sticker riêng khi đạt 10/10 lần đầu.
 - **Mở khoá cấp:** mỗi cấp mở khi bé đạt **ít nhất 8/10 ở cả hai trò** của cấp ngay trước (tính điểm cao nhất, chỉ cần đạt một lần). Server kiểm tra luật này (`403 level_locked`). Ngưỡng điểm: `LEVEL_UNLOCK_MIN_SCORE` trong `src/chapters/levels.ts`.
+- **Cộng trừ** có 2 cấp: **Phạm vi 5** rồi **Phạm vi 10** (mở khoá như trên). Mỗi cấp 2 trò **Phép cộng** (hai nhóm hình gộp lại) và **Phép trừ** (một nhóm hình, vài hình bị gạch bỏ). Phép tính hiện dạng "2 + 3 = ?", giọng đọc "Hai cộng ba bằng mấy?". Mỗi bài 10 phép tính khác nhau, mỗi câu một loại hình ngẫu nhiên.
+- **Sân chơi trí tuệ**: thẻ trên trang chủ, bấm vào để chọn 1 trong 11 chủ đề của Sân chơi tư duy (bên dưới). 5 trò kỹ năng cũ (Quan sát, Chú ý, Tư duy, Ghi nhớ, Tưởng tượng) đã gộp vào các chủ đề nên được tắt; lịch sử cũ vẫn hiện trong khu phụ huynh.
+- **Sân chơi tư duy** (nằm trong thẻ **Sân chơi trí tuệ**): 11 chủ đề – Màu sắc, Hình khối, Đếm số, Toán vui, So sánh, Phân loại, Quan sát, Quy luật (bảng 3×3, sudoku hình 4×4), Mê cung & phương hướng, Chữ cái, Thời gian (trước – sau, buổi, thứ, đồng hồ). Mỗi chủ đề 4–6 cấp, cấp sau mở khi đạt 8/10 cấp trước; sticker riêng khi đạt 10/10 cấp cuối. Một câu có thể có 2–4 phương án.
 - Chương 2: hình xếp lưới tự đổi bố cục theo số lượng (vd. 7 = 4+3), xuất hiện lần lượt; bé **chạm từng hình để đếm** (hình được đánh số và đọc to).
 
 ## 4. Cài đặt & chạy local
@@ -317,6 +320,12 @@ Trong **Phụ huynh → Dữ liệu**:
 Khi thay đổi định dạng: tăng `BACKUP_SCHEMA_VERSION` và thêm bước chuyển đổi trong `upgradeBackup()` (`server/services/backupService.ts`) để file cũ vẫn nhập được. Giới hạn kích thước request của Vercel là 4,5 MB (~1.000 bài học).
 
 ## 11. Thêm chương học mới
+
+**Mở rộng phép tính** (`src/chapters/arithmetic/`):
+- *Thêm cấp* (vd. cộng trừ phạm vi 20 / 100): thêm 1 dòng vào `ARITHMETIC_LEVELS` trong `config.ts` và 1 sticker cho mỗi trò trong `ARITHMETIC_GAMES`, rồi `npm run assets:images` + `npm run assets:voice`. Cặp số được sinh tự động theo `max`.
+- *Thêm phép nhân / chia*: thêm một mục vào `OPERATIONS` (`operations.ts`: ký hiệu, cách đọc, `compute`, `pairs`, `answerRange`), thêm trò vào `ARITHMETIC_GAMES`, thêm cách vẽ vào `OPERATION_VIEWS` (`components/ArithmeticViews.tsx`, vd. nhân = b nhóm × a hình). Bộ sinh câu hỏi, chấm điểm, khoá cấp, phần thưởng, API không cần sửa.
+
+**Thêm dạng bài "Sân chơi tư duy"** (`src/chapters/dada/`): câu hỏi được mô tả bằng các khối hình (`Block`: hàng, lưới, hai tranh, hiện-rồi-úp, chữ, mê cung) và hình (`Visual`: emoji, bóng bay, màu, hình khối, chữ, nhóm, đồng hồ) trong `kit.ts`; `components/DadaViews.tsx` vẽ tất cả. Thêm dạng bài = viết 1 hàm sinh câu hỏi (dùng `choiceQ` / `numberQ`) trong `topics/<chủ đề>.ts` và thêm 1 dòng vào `levels`. Thêm chủ đề = 1 file `Topic` mới + thêm vào `TOPICS` trong `config.ts`. Giọng đọc: `npm run assets:voice` tự lấy mẫu mọi câu hỏi (file `sounds/dada/<mã băm>.m4a`); câu nào thiếu file sẽ đọc bằng giọng của máy.
 
 **Thêm cấp số mới (ví dụ 101–110):** tăng `MAX_NUMBER` trong `src/data/numbers/numbers.ts` (và bổ sung cách đọc trong `numberWord`), thêm 1 cặp sticker vào `LEVEL_STICKERS` trong `src/chapters/number-recognition/levels.ts` (khai báo trong `src/data/stickers.ts`), rồi chạy `npm run assets:images` và `npm run assets:voice`. Thẻ số, trang chương, khoá cấp, giao diện và API tự nhận cấp mới.
 

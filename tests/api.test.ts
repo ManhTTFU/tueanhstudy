@@ -5,6 +5,7 @@ import { createPgliteDatabase } from '../dev/localDb';
 import type { Database } from '../server/db';
 import { resetRateLimits } from '../server/rateLimit';
 import { handleApiRequest, type ApiRequest } from '../server/router';
+import { CHAPTERS } from '../src/chapters/registry';
 import type { Question } from '../src/engine/types';
 
 let db: Database;
@@ -121,12 +122,10 @@ describe('API cơ bản', () => {
 
   it('danh sách chương và summary rỗng ban đầu', async () => {
     const chapters = await call('GET', 'chapters');
-    expect((chapters.body as { chapters: { id: string }[] }).chapters.map((c) => c.id)).toEqual([
-      'number-recognition',
-      'object-counting',
-      'number-finding',
-      ...Array.from({ length: 9 }, (_, i) => [`number-recognition-${i * 10 + 11}-${i * 10 + 20}`, `number-finding-${i * 10 + 11}-${i * 10 + 20}`]).flat(),
-    ]);
+    const ids = (chapters.body as { chapters: { id: string }[] }).chapters.map((c) => c.id);
+    // Chương gốc đứng trước, đủ mọi chương đang bật.
+    expect(ids.slice(0, 5)).toEqual(['number-recognition', 'object-counting', 'number-finding', 'arithmetic', 'brain']);
+    expect([...ids].sort()).toEqual(CHAPTERS.filter((c) => c.enabled).map((c) => c.id).sort());
     const summary = await call('GET', 'summary');
     expect(summary.body).toMatchObject({ totals: { totalCandies: 0, totalCompletedQuizzes: 0 }, overallProgress: 0 });
   });
@@ -215,9 +214,10 @@ describe('Luồng làm bài + phần thưởng', () => {
     const summary = (await call('GET', 'summary')).body as { chapters: { chapterId: string; stars: number; bestScore: number }[]; overallProgress: number };
     const nr = summary.chapters.find((c) => c.chapterId === 'number-recognition')!;
     expect(nr).toMatchObject({ stars: 3, bestScore: 10 });
-    // Chỉ tính trò đã mở khoá: cấp 1–10 (2 trò) + Bé tập đếm; "Tìm số" chưa chơi
-    // nên cấp 11–20 còn khoá => 6/9 sao ≈ 67%.
-    expect(summary.overallProgress).toBe(67);
+    // Chỉ tính trò đã mở khoá: cấp 1–10 (2 trò) + Bé tập đếm + Cộng trừ phạm vi 5 (2 trò)
+    // + cấp 1 của 11 chủ đề tư duy ("Sân chơi trí tuệ" chỉ là cửa vào, không tính); "Tìm số" chưa
+    // chơi nên cấp 11–20 còn khoá => 6/48 sao ≈ 13%.
+    expect(summary.overallProgress).toBe(13);
   });
 
   it('hộp quà: chưa đủ kẹo => 409; đủ kẹo mở 1 lần, gọi lặp cùng giftId không mở thêm', async () => {
@@ -399,11 +399,46 @@ describe('Khoá cấp độ (cơ sở dữ liệu riêng, bắt đầu từ tr�
       expect((await playFresh('number-finding-11-20', 0)).body).toMatchObject({ score: 10 });
 
       // Tiến độ tổng chỉ tính trò đã mở: cấp 1–10 (2+2 sao), Bé tập đếm (0), cấp 11–20 (3+3),
-      // cấp 21–30 vừa mở (0+0) => 10/21 sao ≈ 48%. Các cấp 31–100 còn khoá không tính.
+      // cấp 21–30 vừa mở (0+0), Cộng trừ phạm vi 5 (0+0), 11 chủ đề tư duy (0) => 10/60 sao ≈ 17%.
       const summary = await dev('GET', 'summary');
-      expect((summary.body as { overallProgress: number }).overallProgress).toBe(48);
+      expect((summary.body as { overallProgress: number }).overallProgress).toBe(17);
     } finally {
       await fresh.close();
+    }
+  });
+});
+
+describe('Cộng trừ (API)', () => {
+  it('server sinh và chấm phép cộng; 10/10 tặng sticker bàn tính; phạm vi 10 còn khoá', async () => {
+    const p = await playQuiz('arithmetic');
+    expect(p.questions).toHaveLength(10);
+    for (const q of p.questions) expect(q.prompt).toMatch(/^\d+ \+ \d+ = \?$/);
+    expect(p.complete.body).toMatchObject({ score: 10, candiesEarned: 1 });
+    expect((p.complete.body as { rewards: { rewardCode: string }[] }).rewards.map((r) => r.rewardCode)).toContain('abacus');
+    const locked = await call('POST', 'quiz/sessions', { chapterId: 'arithmetic-add-10' });
+    expect(locked.body).toMatchObject({ error: { code: 'level_locked' } });
+    const sub = await playQuiz('arithmetic-sub-5', 2);
+    expect(sub.complete.body).toMatchObject({ score: 8 });
+    expect((await call('POST', 'quiz/sessions', { chapterId: 'arithmetic-add-10' })).status).toBe(200);
+  });
+});
+
+describe('Sân chơi tư duy (API)', () => {
+  it('chọn hình: server chấm, mở cấp 2 sau khi đạt 8 điểm cấp 1; lịch sử hiện tên hình', async () => {
+    expect((await call('POST', 'quiz/sessions', { chapterId: 'dd-colors-2' })).body).toMatchObject({ error: { code: 'level_locked' } });
+    const p = await playQuiz('dd-colors', 2);
+    expect(p.complete.body).toMatchObject({ score: 8 });
+    expect((await call('POST', 'quiz/sessions', { chapterId: 'dd-colors-2' })).status).toBe(200);
+    const detail = await call('GET', `history/${p.sessionId}`, undefined, { auth: true });
+    const answers = (detail.body as { answers: { correctLabel: string | null }[] }).answers;
+    expect(answers.every((a) => typeof a.correctLabel === 'string')).toBe(true);
+  });
+});
+
+describe('Sân chơi trí tuệ (API)', () => {
+  it('chỉ là cửa vào các chủ đề: không mở bài được; 5 trò kỹ năng cũ đã tắt', async () => {
+    for (const id of ['brain', 'brain-attention', 'brain-logic', 'brain-memory', 'brain-imagine']) {
+      expect((await call('POST', 'quiz/sessions', { chapterId: id })).status).toBe(404);
     }
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { getLevels, isChapterUnlocked, LEVEL_UNLOCK_MIN_SCORE } from '../src/chapters/levels';
-import { CHAPTERS, getChapter, getHomeChapters, getSubGames } from '../src/chapters/registry';
+import { ARITHMETIC_LEVELS } from '../src/chapters/arithmetic/config';
+import { dadaChapters, TOPICS } from '../src/chapters/dada/config';
+import { speechFile, speechOf, type DadaPayload, type Visual } from '../src/chapters/dada/kit';
+import { mazePath } from '../src/chapters/dada/topics/maze';
+import { arithmeticSpeech, arithmeticVoiceFile, OPERATIONS } from '../src/chapters/arithmetic/operations';
+import { CHAPTERS, getChapter, getHomeChapters, getHubChapters, getSubGames } from '../src/chapters/registry';
 import { numberRecognitionChapter } from '../src/chapters/number-recognition/config';
 import { objectCountingChapter } from '../src/chapters/object-counting/config';
 import { findNumberPrompt, NUMBER_CARDS, numberWord } from '../src/data/numbers/numbers';
@@ -45,8 +50,10 @@ function play(state: QuizSessionState, wrongFirst: number): QuizSessionState {
 describe('Hệ thống đăng ký chương', () => {
   it('các chương được bật, đúng mã chương; trang chủ chỉ hiện 2 chương gốc', () => {
     const levelIds = Array.from({ length: 9 }, (_, i) => [`number-recognition-${i * 10 + 11}-${i * 10 + 20}`, `number-finding-${i * 10 + 11}-${i * 10 + 20}`]).flat();
-    expect(CHAPTERS.filter((c) => c.enabled).map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'number-finding', ...levelIds]);
-    expect(getHomeChapters().map((c) => c.id)).toEqual(['number-recognition', 'object-counting']);
+    expect(CHAPTERS.filter((c) => c.enabled).map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'number-finding', ...levelIds, 'arithmetic', 'arithmetic-sub-5', 'arithmetic-add-10', 'arithmetic-sub-10', 'brain', ...dadaChapters.map((c) => c.id)]);
+    expect(getHomeChapters().map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'arithmetic', 'brain']);
+    // 11 chủ đề tư duy nằm trong trang "Sân chơi trí tuệ"
+    expect(getHubChapters('brain').map((c) => c.id)).toEqual(TOPICS.map((t) => `dd-${t.id}`));
     expect(getSubGames('number-recognition').map((c) => c.id)).toEqual(['number-finding', ...levelIds]);
     expect(getChapter('number-recognition')).toBe(numberRecognitionChapter);
     expect(getChapter('khong-ton-tai')).toBeUndefined();
@@ -122,6 +129,221 @@ describe('Cấp độ & mở khoá', () => {
       expect(existsSync(join(PUBLIC, `assets/sounds/cards/${n}.m4a`))).toBe(true);
       expect(existsSync(join(PUBLIC, `assets/sounds/numbers/${n}.m4a`))).toBe(true);
       expect(existsSync(join(PUBLIC, `assets/sounds/questions/find-${n}.m4a`))).toBe(true);
+    }
+  });
+});
+
+describe('Cộng trừ bằng hình', () => {
+  it('2 cấp "Phạm vi 5" và "Phạm vi 10", mỗi cấp Phép cộng + Phép trừ', () => {
+    const levels = getLevels('arithmetic');
+    expect(levels.map((l) => [l.label, l.games.map((g) => g.id)])).toEqual([
+      ['Phạm vi 5', ['arithmetic', 'arithmetic-sub-5']],
+      ['Phạm vi 10', ['arithmetic-add-10', 'arithmetic-sub-10']],
+    ]);
+    expect(levels.flatMap((l) => l.games.map((g) => g.game?.name))).toEqual(['Phép cộng', 'Phép trừ', 'Phép cộng', 'Phép trừ']);
+    expect(getChapter('arithmetic-sub-10')!.fullName).toBe('Phép trừ phạm vi 10');
+  });
+
+  it('cặp số hợp lệ: cộng a,b >= 1; trừ còn lại >= 1; phạm vi 10 chỉ lấy phép tính có số > 5', () => {
+    const [lv5, lv10] = ARITHMETIC_LEVELS;
+    expect(OPERATIONS.add.pairs(lv5!)).toHaveLength(10);
+    expect(OPERATIONS.sub.pairs(lv5!)).toHaveLength(10);
+    for (const [a, b] of OPERATIONS.add.pairs(lv10!)) expect(a >= 1 && b >= 1 && a + b > 5 && a + b <= 10).toBe(true);
+    for (const [a, b] of OPERATIONS.sub.pairs(lv10!)) expect(a > 5 && a <= 10 && b >= 1 && a - b >= 1).toBe(true);
+    expect(arithmeticSpeech('add', 2, 3)).toBe('Hai cộng ba bằng mấy?');
+    expect(arithmeticSpeech('sub', 10, 5)).toBe('Mười trừ năm bằng mấy?');
+  });
+
+  it('mỗi bài: 10 phép tính khác nhau, đáp án đúng, 4 phương án trong phạm vi, mỗi câu 1 hình khác nhau, có giọng đọc', () => {
+    for (const level of getLevels('arithmetic')) {
+      for (const chapter of level.games) {
+        for (let run = 0; run < 20; run++) {
+          const qs = generateQuiz(chapter) as Question<{ op: 'add' | 'sub'; a: number; b: number; objectId: string }>[];
+          expect(qs).toHaveLength(10);
+          expect(new Set(qs.map((q) => q.id)).size).toBe(10);
+          expect(new Set(qs.map((q) => q.payload.objectId)).size).toBe(10);
+          for (const q of qs) {
+            const { op, a, b } = q.payload;
+            expect(q.correctAnswer).toBe(OPERATIONS[op].compute(a, b));
+            expect(q.prompt).toBe(`${a} ${OPERATIONS[op].symbol} ${b} = ?`);
+            expect(q.options).toHaveLength(4);
+            expect(q.options.filter((o) => o === q.correctAnswer)).toHaveLength(1);
+            for (const o of q.options) expect(o >= chapter.range.min && o <= chapter.range.max).toBe(true);
+            expect(getObject(q.payload.objectId)).toBeDefined();
+          }
+        }
+      }
+    }
+    for (const level of ARITHMETIC_LEVELS) {
+      for (const op of ['add', 'sub'] as const) {
+        for (const [a, b] of OPERATIONS[op].pairs(level)) {
+          expect(existsSync(join(PUBLIC, `assets/sounds/${arithmeticVoiceFile(op, a, b)}.m4a`))).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe('Sân chơi tư duy (11 chủ đề)', () => {
+  type DQ = Question<DadaPayload>;
+  const run = (id: string, n = 40) => Array.from({ length: n }, () => generateQuiz(getChapter(id)!) as DQ[]).flat();
+
+  it('11 chủ đề, mỗi chủ đề 4–6 cấp nối tiếp nhau, sticker ở cấp cuối', () => {
+    expect(TOPICS.map((t) => t.name)).toEqual(['Màu sắc', 'Hình khối', 'Đếm số', 'Toán vui', 'So sánh', 'Phân loại', 'Quan sát', 'Quy luật', 'Mê cung', 'Chữ cái', 'Thời gian']);
+    for (const t of TOPICS) {
+      const levels = getLevels(`dd-${t.id}`);
+      expect(levels).toHaveLength(t.levels.length);
+      expect(t.levels.length).toBeGreaterThanOrEqual(4);
+      expect(levels.at(-1)!.games[0]!.rewards.firstPerfectSticker).toBe(t.sticker);
+      expect(isChapterUnlocked(levels[1]!.games[0]!, () => 0)).toBe(false);
+    }
+  });
+
+  it('mọi cấp: 10 câu id khác nhau, phương án hợp lệ, có giọng đọc', () => {
+    for (const c of dadaChapters) {
+      for (let r = 0; r < 25; r++) {
+        const qs = generateQuiz(c) as DQ[];
+        expect(qs).toHaveLength(10);
+        expect(new Set(qs.map((q) => q.id)).size).toBe(10);
+        for (const q of qs) {
+          expect(q.options.length).toBeGreaterThanOrEqual(2);
+          expect(new Set(q.options).size).toBe(q.options.length);
+          expect(q.options.filter((o) => o === q.correctAnswer)).toHaveLength(1);
+          if (q.payload.choices) expect(Object.keys(q.payload.choices).map(Number).sort()).toEqual([...q.options].sort());
+          expect(existsSync(join(PUBLIC, `assets/sounds/${speechFile(speechOf(q))}.m4a`))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('mê cung: đúng một bạn có đường tới đích, và đó là đáp án', () => {
+    for (const id of ['dd-maze', 'dd-maze-2', 'dd-maze-3', 'dd-maze-5']) {
+      for (const q of run(id, 15)) {
+        const maze = q.payload.blocks.find((b) => b.t === 'maze');
+        if (!maze || maze.t !== 'maze') continue;
+        const goal = Number(Object.entries(maze.marks).find(([, v]) => v.t === 'emoji' && !v.n)![0]);
+        const runners = Object.entries(maze.marks).filter(([, v]) => v.t === 'emoji' && v.n);
+        const reach = runners.filter(([cell]) => mazePath(maze.open, maze.w, Number(cell), goal));
+        expect(reach).toHaveLength(1);
+        const ans = q.payload.choices![String(q.correctAnswer)] as Extract<Visual, { t: 'emoji' }>;
+        expect((reach[0]![1] as Extract<Visual, { t: 'emoji' }>).e).toBe(ans.e);
+      }
+    }
+  });
+
+  it('bảng 3×3 và sudoku 4×4: điền đáp án vào ô trống thì mỗi hàng, cột (và ô vuông nhỏ) đều đủ', () => {
+    for (const id of ['dd-patterns-4', 'dd-patterns-5']) {
+      for (const q of run(id, 20)) {
+        const grid = q.payload.blocks[0]!;
+        if (grid.t !== 'grid') throw new Error('cần lưới');
+        const n = grid.cols;
+        const ans = (q.payload.choices![String(q.correctAnswer)] as { e: string }).e;
+        const cells = grid.cells.map((v) => (v.t === 'q' ? ans : (v as { e: string }).e));
+        for (let i = 0; i < n; i++) {
+          expect(new Set(cells.slice(i * n, i * n + n)).size).toBe(n);
+          expect(new Set(cells.filter((_, k) => k % n === i)).size).toBe(n);
+        }
+        if (n === 4) for (const [r, c] of [[0, 0], [0, 2], [2, 0], [2, 2]]) expect(new Set([cells[r! * 4 + c!], cells[r! * 4 + c! + 1], cells[(r! + 1) * 4 + c!], cells[(r! + 1) * 4 + c! + 1]]).size).toBe(4);
+      }
+    }
+  });
+
+  it('một số dạng bài kiểm tra đáp án trực tiếp', () => {
+    for (const q of run('dd-time-6', 5)) {
+      const clock = q.payload.blocks[0]!;
+      if (clock.t !== 'row' || clock.items[0]!.t !== 'clock') throw new Error('cần đồng hồ');
+      expect((q.payload.choices![String(q.correctAnswer)] as { v: string }).v).toBe(`${clock.items[0]!.h} giờ`);
+    }
+    for (const q of run('dd-math-3', 5)) {
+      const row = q.payload.blocks[0]!;
+      if (row.t !== 'row') throw new Error('cần dãy số');
+      const nums = row.items.map((v) => (v.t === 'text' ? Number(v.v) : null));
+      const i = nums.indexOf(null);
+      const known = nums.find((x, k) => x !== null && k !== i)!;
+      expect(q.correctAnswer).toBe(known + (i - nums.indexOf(known)));
+    }
+    for (const q of run('dd-counting-2', 5)) {
+      const grid = q.payload.blocks[0]!;
+      if (grid.t !== 'grid') throw new Error('cần lưới');
+      const target = q.prompt;
+      const counts = new Map<string, number>();
+      for (const v of grid.cells) counts.set((v as { e: string }).e, (counts.get((v as { e: string }).e) ?? 0) + 1);
+      expect([...counts.values()]).toContain(q.correctAnswer);
+      expect(target).toMatch(/^Có bao nhiêu /);
+    }
+    for (const q of run('dd-letters', 5)) expect(q.payload.say).toMatch(/^Đâu là chữ /);
+  });
+});
+
+describe('Sân chơi trí tuệ', () => {
+  type BP = import('../src/chapters/brain/generators').BrainPayload;
+  const quiz = (id: string) => generateQuiz(getChapter(id)!) as Question<BP>[];
+  const cat = (id: string) => getObject(id)!.category;
+
+  it('thẻ "Sân chơi trí tuệ" chỉ là cửa vào 11 chủ đề; 5 trò kỹ năng cũ đã tắt (giữ để hiện lịch sử cũ)', () => {
+    expect(getChapter('brain')).toMatchObject({ enabled: true, hubOnly: true });
+    for (const id of ['brain-attention', 'brain-logic', 'brain-memory', 'brain-imagine']) expect(getChapter(id)!.enabled).toBe(false);
+    expect(getSubGames('brain')).toEqual([]);
+    expect(getHubChapters('brain')).toHaveLength(11);
+  });
+
+  it('mọi câu: 10 câu không trùng, 4 phương án không trùng có đúng 1 đáp án, hình tồn tại', () => {
+    for (const g of getLevels('brain')[0]!.games) {
+      for (let run = 0; run < 30; run++) {
+        const qs = quiz(g.id);
+        expect(qs).toHaveLength(10);
+        expect(new Set(qs.map((q) => q.id)).size).toBe(10);
+        for (const q of qs) {
+          expect(areOptionsValid(q.options, q.correctAnswer, 4)).toBe(true);
+          const p = q.payload;
+          if ('choices' in p) {
+            expect(Object.keys(p.choices).map(Number).sort()).toEqual([...q.options].sort());
+            for (const id of Object.values(p.choices)) expect(getObject(id)).toBeDefined();
+          }
+        }
+      }
+    }
+  });
+
+  it('đáp án đúng theo từng kỹ năng', () => {
+    for (let run = 0; run < 30; run++) {
+      for (const q of quiz('brain')) {
+        const p = q.payload as Extract<BP, { kind: 'observe' }>;
+        expect(p.choices[String(q.correctAnswer)]).toBe(p.target);
+      }
+      for (const q of quiz('brain-imagine')) {
+        const p = q.payload as Extract<BP, { kind: 'silhouette' }>;
+        expect(p.choices[String(q.correctAnswer)]).toBe(p.target);
+      }
+      for (const q of quiz('brain-attention')) {
+        const p = q.payload as Extract<BP, { kind: 'attention' }>;
+        expect(p.grid.filter((id) => id === p.target)).toHaveLength(q.correctAnswer);
+        expect(p.grid.length).toBeGreaterThan(q.correctAnswer);
+        expect(q.prompt).toBe(`Có bao nhiêu ${p.label}?`);
+      }
+      for (const q of quiz('brain-logic')) {
+        const p = q.payload;
+        if (p.kind === 'pattern') {
+          const seq = p.sequence;
+          const period = [2, 3].find((n) => seq.every((id, i) => i < n || id === seq[i - n]))!;
+          expect(period).toBeDefined();
+          expect(p.choices[String(q.correctAnswer)]).toBe(seq[seq.length - period]);
+        } else if (p.kind === 'odd') {
+          const ids = Object.values(p.choices);
+          const odd = p.choices[String(q.correctAnswer)]!;
+          const rest = ids.filter((id) => id !== odd);
+          expect(new Set(rest.map(cat)).size).toBe(1);
+          expect(cat(odd)).not.toBe(cat(rest[0]!));
+        } else throw new Error('Tư duy chỉ có quy luật / khác loại');
+      }
+      for (const q of quiz('brain-memory')) {
+        const p = q.payload as Extract<BP, { kind: 'memory' }>;
+        expect(p.shown).toHaveLength(3);
+        for (const [v, id] of Object.entries(p.choices)) expect(p.shown.includes(id)).toBe(Number(v) === q.correctAnswer);
+      }
+    }
+    for (const f of ['brain-observe', 'brain-pattern', 'brain-odd', 'brain-memory-look', 'brain-memory-ask', 'brain-silhouette', 'chapter-brain']) {
+      expect(existsSync(join(PUBLIC, `assets/sounds/phrases/${f}.m4a`))).toBe(true);
     }
   });
 });

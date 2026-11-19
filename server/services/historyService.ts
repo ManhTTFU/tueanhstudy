@@ -1,6 +1,8 @@
 import { and, asc, count, desc, eq, type SQL } from 'drizzle-orm';
 import { chapterProgress, quizAnswers, quizSessions } from '../../db/schema.js';
 import { getChapter, getEnabledChapters } from '../../src/chapters/registry.js';
+import { visualLabel, type Visual } from '../../src/chapters/dada/kit.js';
+import { getObject } from '../../src/data/objects/catalog.js';
 import type { Database } from '../db.js';
 import { notFound } from '../errors.js';
 import { ensureProgressRow, getStickerCounts, toChapterSummary, type ChapterSummary } from './progressService.js';
@@ -95,7 +97,17 @@ export async function getSessionDetail(db: Database, familyId: string, sessionId
     candiesEarned: session.candiesEarned,
     answers: answers.map((a) => {
       const q = session.questions[a.questionIndex];
+      // Câu trả lời bằng hình (payload.choices: value -> id hình) => kèm tên hình cho phụ huynh dễ đọc.
+      // choices: value -> id hình trong thư viện (Sân chơi trí tuệ) hoặc mô tả hình (Sân chơi tư duy).
+      const choices = (q?.payload as { choices?: Record<string, string | Visual> } | undefined)?.choices;
+      const label = (v: number) => {
+        const c = choices?.[String(v)];
+        if (c === undefined) return null;
+        return typeof c === 'string' ? (getObject(c)?.label ?? c) : visualLabel(c);
+      };
       return {
+        correctLabel: label(a.correctAnswer),
+        selectedLabel: label(a.selectedAnswer),
         questionIndex: a.questionIndex,
         prompt: q?.prompt ?? '',
         questionType: a.questionType,
@@ -149,7 +161,7 @@ export async function getParentStats(db: Database, familyId: string): Promise<Pa
       const total = summary.totalCorrect + summary.totalIncorrect;
       return {
         ...summary,
-        name: def?.name ?? id,
+        name: def?.fullName ?? def?.name ?? id,
         accuracy: total ? Math.round((summary.totalCorrect / total) * 100) : 0,
       };
     }),

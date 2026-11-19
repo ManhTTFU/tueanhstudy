@@ -45,7 +45,7 @@ export async function startSession(
   now = new Date(),
 ): Promise<StartedSession> {
   const chapter = getChapter(chapterId);
-  if (!chapter || !chapter.enabled) throw notFound('Không tìm thấy chương học');
+  if (!chapter || !chapter.enabled || chapter.hubOnly) throw notFound('Không tìm thấy chương học');
 
   // Cấp chưa mở khoá: không cho bắt đầu bài (client chỉ hiển thị khoá, server mới chặn thật).
   const required = unlockRequirements(chapter);
@@ -84,7 +84,7 @@ export async function startSession(
     .values({
       familyId,
       chapterId: chapter.id,
-      chapterName: chapter.name,
+      chapterName: chapter.fullName ?? chapter.name,
       status: 'in_progress',
       questions: questions as StoredQuestion[],
       totalQuestions: questions.length,

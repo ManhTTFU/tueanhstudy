@@ -2,7 +2,8 @@
  * Màn hình làm bài – DÙNG CHUNG cho mọi chương.
  * Phần riêng của chương (QuestionView, giọng đọc) lấy từ ui-registry.
  */
-import { Lock, Volume2, WifiOff } from 'lucide-react';
+import { Eye, Lock, Volume2, WifiOff } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Navigate, useParams } from 'react-router-dom';
 import { chapterPagePath } from '../chapter/ChapterPages';
@@ -16,6 +17,22 @@ import { ResultScreen, RewardCelebration } from './ResultScreens';
 import { useQuiz } from './useQuiz';
 import type { AnyChapter } from '../../chapters/registry';
 import type { ChapterUI } from '../../chapters/ui-registry';
+
+/** Ẩn phương án trong `delayMs` đầu tiên của câu hỏi (vd. thời gian bé ghi nhớ hình). */
+function DelayedReveal({ delayMs, children }: { delayMs: number; children: ReactNode }) {
+  const [shown, setShown] = useState(delayMs <= 0);
+  useEffect(() => {
+    if (delayMs <= 0) return;
+    const t = window.setTimeout(() => setShown(true), delayMs);
+    return () => window.clearTimeout(t);
+  }, [delayMs]);
+  if (shown) return <>{children}</>;
+  return (
+    <p className="flex items-center gap-2 py-6 text-2xl font-bold text-ink/60" data-testid="options-waiting">
+      <Eye size={28} /> Bé nhìn thật kỹ nhé...
+    </p>
+  );
+}
 
 export function QuizPage() {
   const { chapterId = '' } = useParams();
@@ -73,7 +90,7 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
 
   const question = getCurrentQuestion(state);
   if (!question) return null;
-  const { QuestionView } = ui;
+  const { QuestionView, OptionContent } = ui;
 
   return (
     <PageShell className="pb-32">
@@ -108,14 +125,18 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
 
         <QuestionView key={question.id} question={question} />
 
-        <AnswerOptions
-          options={question.options}
-          correctAnswer={question.correctAnswer}
-          triedWrong={getTriedWrongOptions(state)}
-          phase={state.phase}
-          lastSelected={state.lastSelected}
-          onAnswer={quiz.answer}
-        />
+        <DelayedReveal key={question.id} delayMs={ui.optionsDelayMs?.(question) ?? 0}>
+          <AnswerOptions
+            options={question.options}
+            correctAnswer={question.correctAnswer}
+            triedWrong={getTriedWrongOptions(state)}
+            phase={state.phase}
+            lastSelected={state.lastSelected}
+            onAnswer={quiz.answer}
+            renderOption={OptionContent ? (v) => <OptionContent value={v} question={question} /> : undefined}
+            optionLabel={ui.optionLabel ? (v) => ui.optionLabel!(v, question) : undefined}
+          />
+        </DelayedReveal>
       </div>
 
       <FeedbackBubble phase={state.phase} praise={quiz.praise} />

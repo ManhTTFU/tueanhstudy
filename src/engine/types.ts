@@ -67,12 +67,25 @@ export interface ChapterDefinition<P = Record<string, unknown>> {
    * ở mọi trò của cấp N-1 (xem src/chapters/levels.ts).
    */
   level?: number;
+  /**
+   * Chương nằm TRONG trang của một chương khác (không hiện ở trang chủ), vd. các chủ đề
+   * "Sân chơi tư duy" nằm trong "Sân chơi trí tuệ". Khác `parentId`: chương này vẫn
+   * có trang riêng với các cấp của nó.
+   */
+  hubId?: string;
+  /** Chương chỉ là "cửa vào" các chương con theo `hubId` – không có bài, không tính tiến độ. */
+  hubOnly?: boolean;
+  /** Tên cấp hiển thị (mặc định "min–max" theo range), ví dụ "Phạm vi 5". */
+  levelLabel?: string;
+  /** Tên đầy đủ lưu trong lịch sử / thống kê (mặc định `name`), ví dụ "Phép cộng phạm vi 5". */
+  fullName?: string;
   /** Tên + câu ví dụ hiển thị khi bé chọn trò chơi (chương có trò chơi phụ). */
   game?: { name: string; hint: string };
   range: NumberRange;
   questionType: string;
   quiz: {
     questionCount: number;
+    /** Số phương án tối đa của một câu (mỗi câu có từ 2 đến số này). */
     optionCount: number;
     /** Thời gian tối thiểu hợp lệ cho cả bài (ms) – chống gửi kết quả giả. */
     minDurationMs: number;

@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Mascot } from '../../components/Mascot';
 import { TRY_AGAIN_MESSAGE } from '../../engine/messages';
 import type { QuizPhase } from '../../engine/QuizSession';
@@ -19,10 +20,14 @@ interface AnswerOptionsProps {
   phase: QuizPhase;
   lastSelected: AnswerValue | null;
   onAnswer: (v: AnswerValue) => void;
+  /** Nội dung riêng của phương án (vd. hình). Mặc định hiện con số. */
+  renderOption?: ((value: AnswerValue) => ReactNode) | undefined;
+  /** Nhãn đọc cho trình đọc màn hình. Mặc định "Số <value>". */
+  optionLabel?: ((value: AnswerValue) => string) | undefined;
 }
 
-/** 4 nút đáp án lớn (dùng chung cho mọi chương có đáp án là số). */
-export function AnswerOptions({ options, correctAnswer, triedWrong, phase, lastSelected, onAnswer }: AnswerOptionsProps) {
+/** 4 nút đáp án lớn (dùng chung cho mọi chương; mặc định đáp án là số). */
+export function AnswerOptions({ options, correctAnswer, triedWrong, phase, lastSelected, onAnswer, renderOption, optionLabel }: AnswerOptionsProps) {
   const locked = phase !== 'answering';
   return (
     <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4" role="group" aria-label="Các đáp án">
@@ -39,7 +44,7 @@ export function AnswerOptions({ options, correctAnswer, triedWrong, phase, lastS
             data-value={value}
             disabled={locked || isTriedWrong}
             onClick={() => onAnswer(value)}
-            aria-label={`Số ${value}`}
+            aria-label={optionLabel ? optionLabel(value) : `Số ${value}`}
             initial={{ opacity: 0, y: 20 }}
             animate={
               isWrongNow
@@ -57,7 +62,7 @@ export function AnswerOptions({ options, correctAnswer, triedWrong, phase, lastS
               color: isCorrectShown ? '#087F5B' : c.text,
             }}
           >
-            {value}
+            {renderOption ? renderOption(value) : value}
             {isCorrectShown && (
               <span className="absolute -right-3 -top-3 flex h-12 w-12 items-center justify-center rounded-full bg-mint-500 text-white shadow-pop-sm">
                 <Check size={30} strokeWidth={4} />

@@ -275,8 +275,8 @@ function HistoryTab({ guard }: { guard: Guard }) {
                 <tr key={a.questionIndex} className="border-t border-ink/10">
                   <td className="py-1">{a.questionIndex + 1}</td>
                   <td>{a.prompt}</td>
-                  <td className="font-bold">{a.correctAnswer}</td>
-                  <td className={a.isCorrect ? 'font-bold text-mint-500' : 'font-bold text-bubblegum-500'}>{a.selectedAnswer}</td>
+                  <td className="font-bold">{a.correctLabel ?? a.correctAnswer}</td>
+                  <td className={a.isCorrect ? 'font-bold text-mint-500' : 'font-bold text-bubblegum-500'}>{a.selectedLabel ?? a.selectedAnswer}</td>
                   <td>{a.attempts}</td>
                 </tr>
               ))}

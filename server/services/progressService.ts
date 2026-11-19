@@ -102,7 +102,8 @@ export async function getSummary(db: Database, familyId: string): Promise<Summar
   // Tiến độ tổng chỉ tính các trò ĐÃ MỞ KHOÁ: mở cấp mới thì mẫu số tăng dần,
   // bé không bị "tụt" tiến độ vì những cấp chưa chơi tới.
   const bestScoreOf = (id: string) => chapterRows.find((r) => r.chapterId === id)?.bestScore ?? 0;
-  const counted = chapters.filter((c) => isChapterIdUnlocked(c.chapterId, bestScoreOf));
+  const hubs = new Set(getEnabledChapters().filter((c) => c.hubOnly).map((c) => c.id));
+  const counted = chapters.filter((c) => !hubs.has(c.chapterId) && isChapterIdUnlocked(c.chapterId, bestScoreOf));
   const maxStars = counted.length * 3;
   const stars = counted.reduce((s, c) => s + c.stars, 0);
   return {
