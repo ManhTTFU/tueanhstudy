@@ -1,0 +1,492 @@
+/**
+ * Khu vực phụ huynh: thống kê, lịch sử (phân trang), cài đặt, quản lý dữ liệu.
+ * Truy cập trực tiếp bằng URL vẫn phải qua cổng PIN; API kiểm tra quyền tại backend.
+ */
+import { BarChart3, ChevronLeft, ChevronRight, Database, Download, History, LogOut, Settings, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSettings } from '../../app/SettingsContext';
+import { getEnabledChapters } from '../../chapters/registry';
+import { BackButton, LoadingMascotDots, PageShell } from '../../components/ui';
+import { getSticker, stickerImage } from '../../data/stickers';
+import { api, ApiClientError, type HistoryPage, type ParentStats, type SessionDetail, type StickerCount } from '../../services/api';
+import { formatDateTime } from '../../utils/storage';
+import { ParentGate } from './ParentGate';
+
+type Tab = 'stats' | 'history' | 'settings' | 'data';
+
+export function ParentPage() {
+  const [session, setSession] = useState<{ pinConfigured: boolean; authenticated: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const check = useCallback(async () => {
+    try {
+      setSession(await api.parentSession());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không kết nối được máy chủ');
+    }
+  }, []);
+
+  useEffect(() => {
+    void check();
+  }, [check]);
+
+  const onUnauthorized = useCallback(() => setSession((s) => (s ? { ...s, authenticated: false } : s)), []);
+
+  return (
+    <PageShell>
+      <div className="mb-4 flex items-center gap-3">
+        <BackButton to="/" />
+        <h1 className="text-2xl font-extrabold sm:text-3xl">Phụ huynh</h1>
+      </div>
+      {error && <p className="card p-4 text-center">{error}</p>}
+      {!session && !error && <LoadingMascotDots />}
+      {session && !session.authenticated && (
+        <ParentGate pinConfigured={session.pinConfigured} onAuthenticated={() => setSession({ pinConfigured: true, authenticated: true })} />
+      )}
+      {session?.authenticated && <ParentDashboard onUnauthorized={onUnauthorized} />}
+    </PageShell>
+  );
+}
+
+function ParentDashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const [tab, setTab] = useState<Tab>('stats');
+  const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
+    { id: 'stats', label: 'Thống kê', icon: <BarChart3 size={20} /> },
+    { id: 'history', label: 'Lịch sử', icon: <History size={20} /> },
+    { id: 'settings', label: 'Cài đặt', icon: <Settings size={20} /> },
+    { id: 'data', label: 'Dữ liệu', icon: <Database size={20} /> },
+  ];
+  /** Bọc lời gọi API: hết phiên => quay về cổng PIN. */
+  const guard = useCallback(
+    async <T,>(fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn();
+      } catch (e) {
+        if (e instanceof ApiClientError && e.status === 401) onUnauthorized();
+        throw e;
+      }
+    },
+    [onUnauthorized],
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      <nav className="flex flex-wrap gap-2" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`flex min-h-[48px] items-center gap-2 rounded-2xl px-4 font-bold ${tab === t.id ? 'bg-grape-500 text-white' : 'bg-white text-ink/70 shadow-pop-sm'}`}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="ml-auto flex min-h-[48px] items-center gap-2 rounded-2xl bg-white px-4 font-bold text-ink/70 shadow-pop-sm"
+          onClick={() => api.parentLogout().finally(onUnauthorized)}
+        >
+          <LogOut size={20} /> Thoát
+        </button>
+      </nav>
+      {tab === 'stats' && <StatsTab guard={guard} />}
+      {tab === 'history' && <HistoryTab guard={guard} />}
+      {tab === 'settings' && <SettingsTab guard={guard} />}
+      {tab === 'data' && <DataTab guard={guard} />}
+    </div>
+  );
+}
+
+type Guard = <T>(fn: () => Promise<T>) => Promise<T>;
+
+function Panel({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="card p-5">
+      <h2 className="mb-3 text-xl font-extrabold">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function StatsTab({ guard }: { guard: Guard }) {
+  const [stats, setStats] = useState<ParentStats | null>(null);
+  const [stickers, setStickers] = useState<StickerCount[]>([]);
+  useEffect(() => {
+    guard(api.parentStats).then(setStats).catch(() => undefined);
+    api.rewards().then((r) => setStickers(r.stickers)).catch(() => undefined);
+  }, [guard]);
+  if (!stats) return <LoadingMascotDots />;
+  const t = stats.totals;
+  const tiles = [
+    ['Bài đã hoàn thành', t.totalCompletedQuizzes],
+    ['Câu đúng', t.totalCorrectAnswers],
+    ['Câu sai', t.totalIncorrectAnswers],
+    ['Tỷ lệ đúng', `${t.accuracy}%`],
+    ['Tổng số kẹo', t.totalCandies],
+    ['Hộp quà đã mở', t.giftsOpened],
+    ['Sticker đã mở khoá', t.stickersUnlocked],
+  ] as const;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {tiles.map(([label, value]) => (
+          <div key={label} className="card p-4">
+            <div className="text-sm font-semibold text-ink/60">{label}</div>
+            <div className="text-3xl font-extrabold">{value}</div>
+          </div>
+        ))}
+      </div>
+      <Panel title="Thống kê từng chương">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left">
+            <thead className="text-sm text-ink/60">
+              <tr>
+                <th className="py-2">Chương</th>
+                <th>Số bài</th>
+                <th>Điểm cao nhất</th>
+                <th>Số lần 10/10</th>
+                <th>Tỷ lệ đúng</th>
+                <th>Lần chơi gần nhất</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.chapters.map((c) => (
+                <tr key={c.chapterId} className="border-t border-ink/10">
+                  <td className="py-2 font-bold">{c.name}</td>
+                  <td>{c.totalSessions}</td>
+                  <td>{c.bestScore}/10</td>
+                  <td>{c.perfectSessions}</td>
+                  <td>{c.accuracy}%</td>
+                  <td>{formatDateTime(c.lastPlayedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      <Panel title="Sticker đã mở khoá">
+        {stickers.length === 0 ? (
+          <p className="text-ink/60">Chưa có sticker nào.</p>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {stickers.map((s) => (
+              <div key={s.code} className="flex items-center gap-2 rounded-2xl bg-cream px-3 py-2">
+                <img src={stickerImage(s.code)} alt="" className="h-10 w-10" />
+                <span className="font-semibold">
+                  {getSticker(s.code)?.name ?? s.code} {s.quantity > 1 && `x${s.quantity}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function HistoryTab({ guard }: { guard: Guard }) {
+  const [page, setPage] = useState(1);
+  const [chapterId, setChapterId] = useState('');
+  const [data, setData] = useState<HistoryPage | null>(null);
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+
+  useEffect(() => {
+    guard(() => api.history(page, 10, chapterId || undefined)).then(setData).catch(() => undefined);
+  }, [page, chapterId, guard]);
+
+  return (
+    <Panel title="Lịch sử học tập">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <select
+          className="parent-input max-w-xs"
+          value={chapterId}
+          onChange={(e) => {
+            setChapterId(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Lọc theo chương"
+        >
+          <option value="">Tất cả chương</option>
+          {getEnabledChapters().map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        {data && <span className="text-ink/60">{data.total} bài</span>}
+      </div>
+      {!data ? (
+        <LoadingMascotDots />
+      ) : data.items.length === 0 ? (
+        <p className="text-ink/60">Chưa có bài học nào.</p>
+      ) : (
+        <ul className="flex flex-col gap-2" data-testid="history-list">
+          {data.items.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                onClick={() => guard(() => api.historyDetail(item.id)).then(setDetail).catch(() => undefined)}
+                className="flex w-full flex-wrap items-center justify-between gap-2 rounded-2xl bg-cream px-4 py-3 text-left hover:bg-sunny-100"
+              >
+                <span className="font-bold">{item.chapterName}</span>
+                <span className="text-ink/60">{formatDateTime(item.completedAt)}</span>
+                <span className="font-extrabold">
+                  {item.score}/10 {item.isPerfectScore && '🏆'}
+                </span>
+                <span className="text-sm text-ink/60">
+                  Đúng {item.correctAnswers} · Sai {item.incorrectAnswers} · Kẹo +{item.candiesEarned}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {data && data.totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-center gap-3">
+          <button type="button" className="rounded-xl bg-white p-2 shadow-pop-sm disabled:opacity-40" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} aria-label="Trang trước">
+            <ChevronLeft />
+          </button>
+          <span className="font-bold">
+            Trang {data.page}/{data.totalPages}
+          </span>
+          <button type="button" className="rounded-xl bg-white p-2 shadow-pop-sm disabled:opacity-40" disabled={page >= data.totalPages} onClick={() => setPage((p) => p + 1)} aria-label="Trang sau">
+            <ChevronRight />
+          </button>
+        </div>
+      )}
+      {detail && (
+        <Modal onClose={() => setDetail(null)} title={`${detail.chapterName} – ${detail.score}/10`}>
+          <p className="mb-2 text-ink/60">Hoàn thành: {formatDateTime(detail.completedAt)}</p>
+          <table className="w-full text-left">
+            <thead className="text-sm text-ink/60">
+              <tr>
+                <th>#</th>
+                <th>Câu hỏi</th>
+                <th>Đáp án</th>
+                <th>Lần đầu chọn</th>
+                <th>Số lần thử</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.answers.map((a) => (
+                <tr key={a.questionIndex} className="border-t border-ink/10">
+                  <td className="py-1">{a.questionIndex + 1}</td>
+                  <td>{a.prompt}</td>
+                  <td className="font-bold">{a.correctAnswer}</td>
+                  <td className={a.isCorrect ? 'font-bold text-mint-500' : 'font-bold text-bubblegum-500'}>{a.selectedAnswer}</td>
+                  <td>{a.attempts}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Modal>
+      )}
+    </Panel>
+  );
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex min-h-[56px] cursor-pointer items-center justify-between gap-3 rounded-2xl bg-cream px-4">
+      <span className="font-bold">{label}</span>
+      <input type="checkbox" className="h-7 w-7 accent-grape-500" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+function SettingsTab({ guard }: { guard: Guard }) {
+  const settings = useSettings();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col gap-4">
+      <Panel title="Âm thanh & chuyển động">
+        <div className="flex flex-col gap-2">
+          <Toggle label="Bật âm thanh" checked={settings.soundEnabled} onChange={settings.setSoundEnabled} />
+          <Toggle label="Giảm chuyển động (tắt pháo hoa, hiệu ứng nhảy)" checked={settings.reducedMotion} onChange={settings.setReducedMotion} />
+        </div>
+      </Panel>
+      <Panel title="Đổi mã PIN">
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setMsg(null);
+            guard(() => api.changePin(current, next))
+              .then(() => {
+                setMsg('Đã đổi mã PIN.');
+                setCurrent('');
+                setNext('');
+              })
+              .catch((err: Error) => setMsg(err.message));
+          }}
+        >
+          <input className="parent-input" type="password" inputMode="numeric" placeholder="PIN hiện tại" value={current} onChange={(e) => setCurrent(e.target.value.replace(/\D/g, ''))} maxLength={6} autoComplete="current-password" />
+          <input className="parent-input" type="password" inputMode="numeric" placeholder="PIN mới (4–6 số)" value={next} onChange={(e) => setNext(e.target.value.replace(/\D/g, ''))} maxLength={6} autoComplete="new-password" />
+          <button type="submit" className="rounded-xl bg-grape-500 px-5 py-3 font-bold text-white">
+            Đổi
+          </button>
+        </form>
+        {msg && <p className="mt-2 font-semibold">{msg}</p>}
+      </Panel>
+    </div>
+  );
+}
+
+function DataTab({ guard }: { guard: Guard }) {
+  const settings = useSettings();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<{ name: string; data: unknown; sessions: number } | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetText, setResetText] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const doExport = async () => {
+    setMsg(null);
+    try {
+      const backup = await guard(api.exportBackup);
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `be-vui-hoc-toan-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg({ ok: true, text: 'Đã xuất dữ liệu ra file JSON.' });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Xuất dữ liệu thất bại' });
+    }
+  };
+
+  const onFile = async (file: File) => {
+    setMsg(null);
+    try {
+      const data = JSON.parse(await file.text()) as { format?: unknown; schemaVersion?: unknown; data?: { sessions?: unknown[] } };
+      if (data.format !== 'be-vui-hoc-toan-backup' || typeof data.schemaVersion !== 'number') {
+        throw new Error('File không phải bản sao lưu của Bé Vui Học Toán.');
+      }
+      setPending({ name: file.name, data, sessions: Array.isArray(data.data?.sessions) ? data.data!.sessions!.length : 0 });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof SyntaxError ? 'File JSON bị lỗi, không đọc được.' : (e as Error).message });
+    }
+  };
+
+  const doImport = async () => {
+    if (!pending) return;
+    setBusy(true);
+    try {
+      const r = await guard(() => api.importBackup(pending.data));
+      setMsg({ ok: true, text: `Đã khôi phục ${r.imported.sessions} bài học và ${r.imported.rewards} phần thưởng.` });
+      const s = await api.settings();
+      settings.applyServerSettings({ soundEnabled: s.soundEnabled, reducedMotion: s.reducedMotion });
+    } catch (e) {
+      const details = e instanceof ApiClientError && Array.isArray(e.details) ? ` (${(e.details as { path: string; message: string }[]).map((d) => `${d.path}: ${d.message}`).join('; ')})` : '';
+      setMsg({ ok: false, text: `${(e as Error).message}${details}` });
+    } finally {
+      setBusy(false);
+      setPending(null);
+    }
+  };
+
+  const doReset = async () => {
+    setBusy(true);
+    try {
+      await guard(api.resetAll);
+      setMsg({ ok: true, text: 'Đã xoá toàn bộ tiến độ học tập.' });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+      setConfirmReset(false);
+      setResetText('');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Panel title="Sao lưu & khôi phục">
+        <p className="mb-3 text-ink/70">Xuất toàn bộ lịch sử, tiến độ và phần thưởng ra file JSON. Có thể nhập lại file này để khôi phục dữ liệu.</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={doExport} className="flex items-center gap-2 rounded-xl bg-sky-500 px-5 py-3 font-bold text-white">
+            <Download size={20} /> Xuất dữ liệu JSON
+          </button>
+          <button type="button" onClick={() => fileRef.current?.click()} className="flex items-center gap-2 rounded-xl bg-mint-500 px-5 py-3 font-bold text-white">
+            <Upload size={20} /> Nhập dữ liệu JSON
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void onFile(f);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </Panel>
+      <Panel title="Xoá dữ liệu">
+        <p className="mb-3 text-ink/70">Xoá toàn bộ lịch sử học, kẹo và sticker. Mã PIN được giữ nguyên. Nên xuất dữ liệu trước khi xoá.</p>
+        <button type="button" onClick={() => setConfirmReset(true)} className="flex items-center gap-2 rounded-xl bg-bubblegum-500 px-5 py-3 font-bold text-white">
+          <Trash2 size={20} /> Xoá toàn bộ tiến độ
+        </button>
+      </Panel>
+      {msg && (
+        <p role="status" className={`rounded-2xl p-4 font-semibold ${msg.ok ? 'bg-mint-100' : 'bg-bubblegum-100'}`}>
+          {msg.text}
+        </p>
+      )}
+      {pending && (
+        <Modal title="Xác nhận ghi đè dữ liệu" onClose={() => setPending(null)}>
+          <p className="mb-4">
+            Nhập file <b>{pending.name}</b> ({pending.sessions} bài học) sẽ <b>thay thế toàn bộ</b> dữ liệu học tập hiện tại. Bạn chắc chắn chứ?
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="rounded-xl bg-white px-4 py-3 font-bold shadow-pop-sm" onClick={() => setPending(null)}>
+              Huỷ
+            </button>
+            <button type="button" className="rounded-xl bg-mint-500 px-4 py-3 font-bold text-white" disabled={busy} onClick={doImport}>
+              Ghi đè & khôi phục
+            </button>
+          </div>
+        </Modal>
+      )}
+      {confirmReset && (
+        <Modal title="Xoá toàn bộ tiến độ?" onClose={() => setConfirmReset(false)}>
+          <p className="mb-2">Thao tác này không thể hoàn tác. Gõ <b>XOA</b> để xác nhận.</p>
+          <input className="parent-input mb-4" value={resetText} onChange={(e) => setResetText(e.target.value.toUpperCase())} aria-label="Gõ XOA để xác nhận" />
+          <div className="flex justify-end gap-2">
+            <button type="button" className="rounded-xl bg-white px-4 py-3 font-bold shadow-pop-sm" onClick={() => setConfirmReset(false)}>
+              Huỷ
+            </button>
+            <button type="button" className="rounded-xl bg-bubblegum-500 px-4 py-3 font-bold text-white disabled:opacity-40" disabled={resetText !== 'XOA' || busy} onClick={doReset}>
+              Xoá vĩnh viễn
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+      <div className="card max-h-[85vh] w-full max-w-2xl overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-xl font-extrabold">{title}</h3>
+          <button type="button" onClick={onClose} aria-label="Đóng" className="rounded-xl p-2 hover:bg-ink/5">
+            <X />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,66 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+"Bé Vui Học Toán" – a Vietnamese math game for children aged 3–5. Vite + React 18 + TypeScript (strict) + Tailwind frontend, a REST API served as a single Vercel Function, and Neon PostgreSQL via Drizzle ORM. All UI text, comments, error messages and docs are in **Vietnamese**; keep it that way. README.md (Vietnamese) holds the full deploy, backup and extension guides.
+
+## Commands
+
+```bash
+npm run dev            # Vite dev server on :5173, serves frontend AND /api (dev/apiPlugin.ts)
+npm run build          # tsc --noEmit && vite build -> dist/ (hashed bundles go in dist/static/)
+npm run typecheck
+npm test               # vitest run (tests/**/*.test.ts, node environment)
+npx vitest run tests/api.test.ts            # single file
+npx vitest run -t "không cộng trùng"        # single test, matched by name
+npm run db:generate    # after editing db/schema.ts -> new SQL in db/migrations/
+npm run db:migrate     # migrates DATABASE_URL, or local PGlite (.data/pglite) when unset
+npm run db:studio
+npm run assets:images  # download missing Fluent Emoji SVGs for the object/sticker catalogs
+npm run assets:voice   # generate missing Vietnamese voice .m4a (macOS `say -v Linh` only)
+npm run assets:sfx     # regenerate synthesized WAV effects
+```
+
+No linter is configured. `.env.local` is loaded by vite.config.ts, drizzle.config.ts and scripts/migrate.ts.
+
+## Architecture
+
+### Shared pure core (client + server)
+`src/engine/`, `src/chapters/registry.ts`, `src/chapters/*/{config,generator}.ts`, `src/config/`, `src/data/stickers.ts` and `src/data/objects/catalog.ts` are imported by **both** the React app and the server. Rules for these files:
+- No React, DOM, or other browser-only imports.
+- Relative imports **must end in `.js`** (e.g. `'./random.js'`). Vercel runs `api/` as unbundled per-file ESM on Node, so imports without an extension break at runtime even though Vite and `tsc` accept them. Purely frontend files (`.tsx`, features/, components/) can use imports without an extension.
+
+### One quiz engine, many chapters
+- A chapter is a `ChapterDefinition` (`src/engine/types.ts`) registered in `src/chapters/registry.ts`. It holds the id, theme, range, quiz config, reward config, `enabled` flag and a `QuestionGenerator` built with `createQuestionGenerator` (which handles de-duplication). Its UI is registered separately in `src/chapters/ui-registry.tsx` (`QuestionView`, `Illustration`, `promptVoice`, optional `Learning` stage).
+- `QuizPage` + `useQuiz` (`src/features/quiz/`) are generic and must stay chapter-agnostic. Home, intro and learning pages iterate the registries. To add a chapter, add these files and registry entries; do not branch on a chapter id in shared code.
+- `QuizSession.ts` is a pure state machine (`answering → correct|wrong → … → finished`). Input is ignored outside `answering`, which prevents double taps from counting. Tried wrong options are dimmed.
+- **Scoring uses the first attempt only.** A wrong first try counts as incorrect even after the child retries correctly.
+
+### Server trusts nothing from the client
+- `POST /api/quiz/sessions`: the server generates the questions (`generateQuiz`) and stores them in `quiz_sessions.questions` (jsonb).
+- `POST /api/quiz/sessions/:id/complete`: the client sends only `{questionId, attempts[]}`. `evaluateSubmission` validates the attempts against the stored questions and recomputes the score, and enforces `minDurationMs`. Everything runs in **one transaction** (`server/services/quizService.ts`): `SELECT … FOR UPDATE` on the session; an already-completed session returns the old result with `rewards: []`.
+- Reward idempotency is enforced in the database: `rewards.dedupe_key` is UNIQUE (`session:<id>:candy`, `achievement:<code>`, `gift:<giftId>`), inserted with `ON CONFLICT DO NOTHING`. Gift opening is idempotent on a client-generated UUID (`gift_openings.id`). Candies accumulate and are never spent: available gifts = `floor(totalCandies / candiesPerGift) - giftsOpened`.
+- `progress` and `app_settings` are single-row tables (id = 1, enforced by CHECK). Access them through `ensureProgressRow` and `getSettingsRow`.
+
+### API layer
+- `server/router.ts` defines a platform-independent `handleApiRequest(ApiRequest, db?) → ApiResponse` with a regex route table. Each route can set a rate-limit bucket and a `parent: true` auth flag.
+- `api/router.ts` (the only Vercel Function) adapts `VercelRequest` to `ApiRequest`. `vercel.json` rewrites `/api/:path*` to `/api/router?route=:path*`. Add new endpoints to the route table; do not create more files in `api/`, because the free Hobby plan limits how many Functions a deployment can have.
+- Every non-GET request needs the header `X-BVHT-Client: 1` (CSRF guard). `src/services/api.ts` adds it automatically.
+- Parent auth: the PIN is hashed with scrypt; the session is an HttpOnly, SameSite=Strict cookie `bvht_parent` holding an HMAC token that is checked against `app_settings.session_version`. Five wrong PINs lock login for 5 minutes (stored in the database).
+- The DB connection (`server/db.ts`) is a `pg` Pool from `DATABASE_URL`. `setDatabase()`, or passing `db` to `handleApiRequest`, injects PGlite instead. `dev/apiPlugin.ts` uses this when `DATABASE_URL` is unset, and the tests always do (`createPgliteDatabase()` with no directory = in-memory, migrations applied).
+
+### Backup format
+`server/services/backupService.ts` defines the format: `format: "be-vui-hoc-toan-backup"` plus `schemaVersion`. Import validates with Zod plus cross-checks (referential integrity, candy total = sum of candy rewards, gift count) and then replaces all learning tables in one transaction. PIN and secret are never exported or overwritten. If you change the shape, bump `BACKUP_SCHEMA_VERSION` and add a conversion step in `upgradeBackup()`.
+
+### Assets
+- Everything lives under `public/assets/` (served at `/assets/...`, while hashed build output goes to `/static/`).
+- Object images: `images/objects/<id>.svg`, keyed by `OBJECTS` in `src/data/objects/catalog.ts`. The `source` field is the fluentui-emoji folder name.
+- Voice files: `sounds/<file>.m4a`, listed by `allVoiceLines()` in `src/data/voice.ts`.
+- `tests/engine.test.ts` asserts that every catalog object, number card and sticker has its image and audio file. Adding a catalog entry therefore needs `assets:images` and `assets:voice` (macOS only). Sources and licenses are recorded in `public/assets/LICENSES.md`.
+
+### Frontend conventions
+- Child-facing UI uses the `.kid-btn` class (touch targets of at least 64px) and the `Mascot` component with moods (`neutral`, `happy`, `sad`, `cheer`, `thinking`). Feedback must always be gentle and positive; never use failure wording for a 3-year-old.
+- Sound and effects go through the `AudioController` / `AnimationController` singletons, which respect the sound-off and reduced-motion settings. Settings are stored in the database through `SettingsContext`; localStorage is only a display cache and must never hold real data.
+- `CountingGrid` renders `<button>`s only when `tapToCount` is true, so it never nests buttons when placed inside a clickable card.

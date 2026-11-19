@@ -1,0 +1,55 @@
+{
+  "name": "be-vui-hoc-toan",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Bé Vui Học Toán – Nền tảng học toán tương tác dành cho trẻ mầm non",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "assets:images": "tsx scripts/download-images.ts",
+    "assets:voice": "tsx scripts/generate-voice.ts",
+    "assets:sfx": "tsx scripts/generate-sfx.ts"
+  },
+  "dependencies": {
+    "@fontsource/baloo-2": "^5.3.0",
+    "canvas-confetti": "^1.9.4",
+    "drizzle-orm": "^0.45.4",
+    "framer-motion": "^14.14.0",
+    "lucide-react": "^1.75.0",
+    "pg": "^8.23.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.6",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vercel/node": "^32.0.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "autoprefixer": "^10.6.2",
+    "dotenv": "^18.0.10",
+    "drizzle-kit": "^0.31.11",
+    "postcss": "^8.5.33",
+    "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.15",
+    "typescript": "5.9",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  }
+}

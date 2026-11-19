@@ -1,0 +1,58 @@
+@import '@fontsource/baloo-2/vietnamese-500.css';
+@import '@fontsource/baloo-2/vietnamese-700.css';
+@import '@fontsource/baloo-2/vietnamese-800.css';
+@import '@fontsource/baloo-2/latin-500.css';
+@import '@fontsource/baloo-2/latin-700.css';
+@import '@fontsource/baloo-2/latin-800.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    @apply bg-cream font-kid text-ink antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    touch-action: manipulation;
+  }
+  button {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  img {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+  :focus-visible {
+    outline: 4px solid #5bbcff;
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  /* Nút lớn cho bé – vùng chạm tối thiểu 64px */
+  .kid-btn {
+    @apply inline-flex min-h-[64px] min-w-[64px] items-center justify-center gap-2 rounded-3xl px-6 text-2xl font-extrabold shadow-pop transition-transform active:translate-y-1 active:shadow-pop-sm disabled:opacity-50;
+  }
+  .card {
+    @apply rounded-4xl bg-white shadow-soft;
+  }
+  .parent-input {
+    @apply w-full rounded-xl border-2 border-ink/15 bg-white px-4 py-3 text-lg outline-none focus:border-sky-400;
+  }
+}
+
+.bg-playful {
+  background-color: #fff8ec;
+  background-image: radial-gradient(circle at 10% 15%, #ffe3ee 0 70px, transparent 71px),
+    radial-gradient(circle at 92% 10%, #ddf3ff 0 90px, transparent 91px),
+    radial-gradient(circle at 85% 85%, #ddf8ec 0 110px, transparent 111px),
+    radial-gradient(circle at 5% 90%, #fff4cc 0 90px, transparent 91px);
+  background-attachment: fixed;
+}

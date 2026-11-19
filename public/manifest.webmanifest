@@ -1,0 +1,12 @@
+{
+  "name": "Bé Vui Học Toán",
+  "short_name": "Bé Học Toán",
+  "description": "Học mà chơi – Chơi mà học",
+  "lang": "vi",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FFF8EC",
+  "theme_color": "#FFD23F",
+  "icons": [{ "src": "/assets/mascot/mochi.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
