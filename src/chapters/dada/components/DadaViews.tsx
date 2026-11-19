@@ -8,6 +8,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { Block, DadaPayload, ShapeId, Visual } from '../kit';
 import { visualLabel } from '../kit';
 import type { Question } from '../../../engine/types';
+import { NumberWithDots } from '../../../components/NumberDots';
 
 type Size = 'xl' | 'lg' | 'md' | 'sm' | 'opt';
 const EM: Record<Size, string> = { xl: 'clamp(5rem, 22vmin, 8rem)', lg: 'clamp(3.5rem, 16vmin, 5.5rem)', md: 'clamp(2.4rem, 10vmin, 3.6rem)', sm: 'clamp(1.6rem, 7vmin, 2.4rem)', opt: 'clamp(2.8rem, 13vmin, 4.4rem)' };
@@ -224,7 +225,7 @@ export function DadaQuestionView({ question }: { question: Question<DadaPayload>
 
 export function DadaOption({ value, question }: { value: number; question: Question<DadaPayload> }) {
   const v = question.payload.choices?.[String(value)];
-  if (!v) return <>{value}</>;
+  if (!v) return <NumberWithDots value={value} />;
   return <VisualView v={v} size="opt" />;
 }
 

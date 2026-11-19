@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { NumberDots } from '../../../components/NumberDots';
 import { NUMBER_CARDS } from '../../../data/numbers/numbers';
 import type { Question } from '../../../engine/types';
 import type { NumberRecognitionPayload } from '../generator';
@@ -34,7 +35,7 @@ export function NumberQuestionView({ question }: { question: Question<NumberReco
   const n = question.payload.number;
   const color = numberColor(n);
   return (
-    <div className="flex items-center justify-center py-2">
+    <div className="flex flex-col items-center justify-center gap-3 py-2">
       <motion.div
         key={question.id}
         initial={{ scale: 0.3, rotate: -20, opacity: 0 }}
@@ -52,6 +53,9 @@ export function NumberQuestionView({ question }: { question: Question<NumberReco
           {n}
         </span>
       </motion.div>
+      <span style={{ color }}>
+        <NumberDots value={n} size="lg" />
+      </span>
     </div>
   );
 }

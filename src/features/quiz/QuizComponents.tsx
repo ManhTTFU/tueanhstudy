@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Mascot } from '../../components/Mascot';
+import { NumberWithDots } from '../../components/NumberDots';
 import { TRY_AGAIN_MESSAGE } from '../../engine/messages';
 import type { QuizPhase } from '../../engine/QuizSession';
 import type { AnswerValue } from '../../engine/types';
@@ -62,7 +63,7 @@ export function AnswerOptions({ options, correctAnswer, triedWrong, phase, lastS
               color: isCorrectShown ? '#087F5B' : c.text,
             }}
           >
-            {renderOption ? renderOption(value) : value}
+            {renderOption ? renderOption(value) : <NumberWithDots value={value} />}
             {isCorrectShown && (
               <span className="absolute -right-3 -top-3 flex h-12 w-12 items-center justify-center rounded-full bg-mint-500 text-white shadow-pop-sm">
                 <Check size={30} strokeWidth={4} />

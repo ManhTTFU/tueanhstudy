@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Gamepad2, Volume2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CountingGrid } from '../../../components/CountingGrid';
+import { NumberDots } from '../../../components/NumberDots';
 import { TensFrame } from '../../../components/TensFrame';
 import { ProgressBar } from '../../../components/ui';
 import { numberCardsInRange } from '../../../data/numbers/numbers';
@@ -79,6 +80,9 @@ export function NumberFlashcards({ onFinished, range = { min: 1, max: 10 } }: { 
             </div>
             <span className="font-extrabold leading-none" style={{ color: card.color, fontSize: 'clamp(7rem, 24vmin, 11rem)' }}>
               {card.value}
+            </span>
+            <span style={{ color: card.color }}>
+              <NumberDots value={card.value} size="md" className="mb-1" />
             </span>
             {object && card.value > 10 && <TensFrame value={card.value} image={objectImage(object.id)} alt={object.label} />}
             {object && card.value <= 10 && (
