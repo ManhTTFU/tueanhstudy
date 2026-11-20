@@ -18,7 +18,7 @@ import {
 import { isChapterUnlocked, LEVEL_UNLOCK_MIN_SCORE, unlockRequirements } from '../../src/chapters/levels.js';
 import { coinsForAnswers } from '../../src/chapters/primary/rewards.js';
 import { chapterAgeGroup, getChapter } from '../../src/chapters/registry.js';
-import { encouragementFor } from '../../src/engine/messages.js';
+import { messagesFor } from '../../src/engine/messages.js';
 import { evaluateSubmission, generateQuiz, type SubmittedAnswer } from '../../src/engine/QuizEngine.js';
 import { computeSessionRewards, giftsAvailable } from '../../src/engine/RewardService.js';
 import type { Question, RewardGrant, Rng } from '../../src/engine/types.js';
@@ -268,7 +268,7 @@ export async function completeSession(
       chapterId: chapter.id,
       ...score,
       completedAt: now.toISOString(),
-      encouragement: encouragementFor(score.score),
+      encouragement: messagesFor(chapterAgeGroup(chapter)).encouragement(score.score),
       candiesEarned,
       coinsEarned,
       rewards: newGrants,
@@ -284,6 +284,7 @@ export async function completeSession(
 
 async function buildExistingResult(db: Database, session: QuizSessionRow): Promise<CompletedSessionResult> {
   const p = await ensureProgressRow(db, session.familyId);
+  const existingChapter = getChapter(session.chapterId);
   return {
     sessionId: session.id,
     chapterId: session.chapterId,
@@ -294,7 +295,7 @@ async function buildExistingResult(db: Database, session: QuizSessionRow): Promi
     percent: session.totalQuestions ? Math.round((session.correctAnswers / session.totalQuestions) * 100) : 0,
     isPerfectScore: session.isPerfectScore,
     completedAt: (session.completedAt ?? new Date()).toISOString(),
-    encouragement: encouragementFor(session.score),
+    encouragement: messagesFor(existingChapter ? chapterAgeGroup(existingChapter) : 'preschool').encouragement(session.score),
     candiesEarned: session.candiesEarned,
     coinsEarned: 0,
     rewards: [],

@@ -10,6 +10,7 @@ import { PRIMARY_TOPICS } from '../src/chapters/primary/topics';
 import { evaluateSubmission, generateQuiz, MAX_INPUT_ATTEMPTS, validateQuestionSet } from '../src/engine/QuizEngine';
 import { answerQuestion, createQuizSession, retryQuestion } from '../src/engine/QuizSession';
 import { createSeededRng } from '../src/engine/random';
+import { messagesFor } from '../src/engine/messages';
 import type { Question } from '../src/engine/types';
 
 
@@ -121,5 +122,14 @@ describe('Nhóm 5–9 tuổi – bộ sinh đề', () => {
       expect(new Set(c).size).toBe(c.length);
       expect(c.every((x) => x >= 0)).toBe(true);
     }
+  });
+});
+
+describe('Lời khen theo nhóm tuổi', () => {
+  it('nhóm 5–9 tuổi: không gọi "bé", không khen "thông minh"; nhóm 3–5 giữ nguyên', () => {
+    const m = messagesFor('primary');
+    const all = [...m.praises, m.tryAgain, m.perfect, ...[0, 5, 8, 10].map((x) => m.encouragement(x))].join(' | ');
+    expect(all).not.toMatch(/bé|thông minh/i);
+    expect(messagesFor('preschool').praises).toContain('Bé thật thông minh!');
   });
 });

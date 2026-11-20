@@ -661,7 +661,7 @@ describe('Nhóm 5–9 tuổi: xu, ôn câu sai, đổi quà, thử thách, xếp
     expect(after.reviewCount - before.reviewCount).toBe(3);
     // 10/10 ở nhóm 5–9 tuổi: chỉ có xu, không kẹo / sticker / thành tích
     const perfect = await playQuiz('pm-mental');
-    expect(perfect.complete.body).toMatchObject({ isPerfectScore: true, candiesEarned: 0, coinsEarned: 20, rewards: [] });
+    expect(perfect.complete.body).toMatchObject({ isPerfectScore: true, candiesEarned: 0, coinsEarned: 20, rewards: [], encouragement: 'XUẤT SẮC! CON LÀM ĐÚNG HẾT RỒI!' });
     // Nhóm 3–5 tuổi không có xu
     const { complete: pre } = await playQuiz('number-recognition');
     expect(pre.body).toMatchObject({ coinsEarned: 0 });

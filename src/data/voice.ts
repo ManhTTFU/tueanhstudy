@@ -10,7 +10,8 @@ import { speechFile, speechOf, type DadaQuestion } from '../chapters/dada/kit.js
 import { createSeededRng } from '../engine/random.js';
 import { OBJECTS } from './objects/catalog.js';
 import { MAX_NUMBER, NUMBER_CARDS, findNumberPrompt, numberWord } from './numbers/numbers.js';
-import { PRAISES, PERFECT_MESSAGE, TRY_AGAIN_MESSAGE } from '../engine/messages.js';
+import { PRAISES, PERFECT_MESSAGE, PRIMARY_PRAISES, primaryEncouragement, PRIMARY_TRY_AGAIN, TRY_AGAIN_MESSAGE } from '../engine/messages.js';
+import type { AgeGroup } from '../engine/types.js';
 
 export interface VoiceLine {
   /** Đường dẫn tương đối trong public/assets/sounds (không có đuôi). Rỗng = dùng giọng đọc hệ thống. */
@@ -47,7 +48,22 @@ export const VOICE_PHRASES = {
 
 export type VoicePhraseKey = keyof typeof VOICE_PHRASES;
 
-export function praiseVoice(index: number): VoiceLine {
+/** Giọng nói của nhóm 5–9 tuổi (file trong sounds/primary/). */
+const PRIMARY_PHRASES = {
+  tryAgain: { file: 'primary/try-again', text: PRIMARY_TRY_AGAIN },
+  perfect: { file: 'primary/perfect', text: 'Xuất sắc! Con làm đúng hết rồi!' },
+  resultGreat: { file: 'primary/result-great', text: primaryEncouragement(8) },
+  resultGood: { file: 'primary/result-good', text: primaryEncouragement(5) },
+  resultTry: { file: 'primary/result-try', text: primaryEncouragement(0) },
+} satisfies Record<string, VoiceLine>;
+
+/** Câu đọc khi sai / 10 điểm / kết quả theo nhóm tuổi. */
+export function phrasesFor(ageGroup: AgeGroup = 'preschool') {
+  return ageGroup === 'primary' ? PRIMARY_PHRASES : VOICE_PHRASES;
+}
+
+export function praiseVoice(index: number, ageGroup: AgeGroup = 'preschool'): VoiceLine {
+  if (ageGroup === 'primary') return { file: `primary/praise-${index}`, text: PRIMARY_PRAISES[index] ?? PRIMARY_PRAISES[0] };
   return { file: `praise/${index}`, text: PRAISES[index] ?? PRAISES[0] };
 }
 
@@ -96,6 +112,8 @@ export function allVoiceLines(): VoiceLine[] {
   return [
     ...Object.values(VOICE_PHRASES),
     ...PRAISES.map((text, i) => ({ file: `praise/${i}`, text })),
+    ...PRIMARY_PRAISES.map((_, i) => praiseVoice(i, 'primary')),
+    ...Object.values(PRIMARY_PHRASES),
     ...Array.from({ length: MAX_NUMBER + 1 }, (_, n) => ({ file: `numbers/${n}`, text: numberWord(n) })),
     ...NUMBER_CARDS.map((c) => ({ file: `cards/${c.value}`, text: `Số ${c.word.toLowerCase()}. ${c.caption}.` })),
     ...NUMBER_CARDS.map((c) => findNumberVoice(c.value)),

@@ -5,8 +5,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnyChapter } from '../../chapters/registry';
 import type { ChapterUI } from '../../chapters/ui-registry';
-import { praiseVoice, VOICE_PHRASES } from '../../data/voice';
-import { PRAISES } from '../../engine/messages';
+import { chapterAgeGroup } from '../../chapters/registry';
+import { phrasesFor, praiseVoice } from '../../data/voice';
+import { messagesFor } from '../../engine/messages';
 import { generateQuiz } from '../../engine/QuizEngine';
 import { buildLocalResult, type QuizResult } from '../../engine/QuizResult';
 import {
@@ -35,6 +36,10 @@ export interface QuizResultView extends QuizResult {
 }
 
 export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
+  // Lời khen / động viên theo nhóm tuổi của chương.
+  const ageGroup = chapterAgeGroup(chapter);
+  const messages = messagesFor(ageGroup);
+  const phrases = phrasesFor(ageGroup);
   const [state, setState] = useState<QuizSessionState | null>(null);
   const [stage, setStage] = useState<QuizStage>('loading');
   const [result, setResult] = useState<QuizResultView | null>(null);
@@ -121,7 +126,7 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
 
   const submit = useCallback(async (finalState: QuizSessionState) => {
     setStage('submitting');
-    const local = buildLocalResult(finalState);
+    const local = buildLocalResult(finalState, ageGroup);
     let view: QuizResultView = local;
     if (finalState.sessionId) {
       try {
@@ -142,11 +147,11 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
     if (view.isPerfectScore) {
       AnimationController.bigCelebration();
       AudioController.sfx('celebrate');
-      void AudioController.speak(VOICE_PHRASES.perfect);
+      void AudioController.speak(phrases.perfect);
       setStage('celebrate');
     } else {
       const voice =
-        view.score >= 8 ? VOICE_PHRASES.resultGreat : view.score >= 5 ? VOICE_PHRASES.resultGood : VOICE_PHRASES.resultTry;
+        view.score >= 8 ? phrases.resultGreat : view.score >= 5 ? phrases.resultGood : phrases.resultTry;
       void AudioController.speak(voice);
       setStage('result');
     }
@@ -171,15 +176,15 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
       if (next === state) return;
       setState(next);
       if (next.phase === 'correct') {
-        const i = Math.floor(Math.random() * PRAISES.length);
-        setPraise(PRAISES[i]!);
+        const i = Math.floor(Math.random() * messages.praises.length);
+        setPraise(messages.praises[i]!);
         AudioController.sfx('correct');
         AnimationController.smallBurst();
-        later(() => void AudioController.speak(praiseVoice(i)), 250);
+        later(() => void AudioController.speak(praiseVoice(i, ageGroup)), 250);
         later(() => setState((s) => (s ? nextQuestion(s) : s)), FEEDBACK_CORRECT_MS);
       } else {
         AudioController.sfx('wrong');
-        later(() => void AudioController.speak(VOICE_PHRASES.tryAgain), 200);
+        later(() => void AudioController.speak(phrases.tryAgain), 200);
         later(() => setState((s) => (s ? retryQuestion(s) : s)), FEEDBACK_WRONG_MS);
       }
     },
@@ -191,6 +196,8 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
     stage,
     result,
     praise,
+    tryAgainMessage: messages.tryAgain,
+    perfectMessage: messages.perfect,
     offline,
     unavailable,
     answer,

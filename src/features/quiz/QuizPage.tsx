@@ -79,7 +79,7 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
   }
 
   if (stage === 'celebrate' && result) {
-    return <RewardCelebration result={result} onContinue={quiz.showResult} coinsOnly={chapterAgeGroup(chapter) === 'primary'} />;
+    return <RewardCelebration result={result} onContinue={quiz.showResult} coinsOnly={chapterAgeGroup(chapter) === 'primary'} title={quiz.perfectMessage} />;
   }
 
   if (stage === 'result' && result) {
@@ -164,7 +164,7 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
         )}
       </div>
 
-      <FeedbackBubble phase={state.phase} praise={quiz.praise} />
+      <FeedbackBubble phase={state.phase} praise={quiz.praise} tryAgain={quiz.tryAgainMessage} />
     </PageShell>
   );
 }

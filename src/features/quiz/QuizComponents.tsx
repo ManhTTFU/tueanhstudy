@@ -77,7 +77,7 @@ export function AnswerOptions({ options, correctAnswer, triedWrong, phase, lastS
 }
 
 /** Phản hồi đúng/sai: luôn nhẹ nhàng, tích cực. */
-export function FeedbackBubble({ phase, praise }: { phase: QuizPhase; praise: string }) {
+export function FeedbackBubble({ phase, praise, tryAgain = TRY_AGAIN_MESSAGE }: { phase: QuizPhase; praise: string; tryAgain?: string }) {
   const show = phase === 'correct' || phase === 'wrong';
   const correct = phase === 'correct';
   return (
@@ -102,7 +102,7 @@ export function FeedbackBubble({ phase, praise }: { phase: QuizPhase; praise: st
           >
             <Mascot mood={correct ? 'cheer' : 'sad'} size={84} />
             <span className={`text-2xl font-extrabold sm:text-4xl ${correct ? 'text-[#087F5B]' : 'text-[#1864AB]'}`}>
-              {correct ? praise : TRY_AGAIN_MESSAGE}
+              {correct ? praise : tryAgain}
             </span>
           </div>
         </motion.div>

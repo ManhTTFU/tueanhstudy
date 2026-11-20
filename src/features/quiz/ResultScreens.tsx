@@ -15,7 +15,18 @@ function starsFor(score: number) {
 
 /** Màn hình nhận thưởng khi đạt 10/10 (toàn màn hình). */
 /** `coinsOnly`: nhóm 5–9 tuổi – thưởng bằng xu, không có kẹo / hộp quà / sticker. */
-export function RewardCelebration({ result, onContinue, coinsOnly = false }: { result: QuizResultView; onContinue: () => void; coinsOnly?: boolean }) {
+export function RewardCelebration({
+  result,
+  onContinue,
+  coinsOnly = false,
+  title = PERFECT_MESSAGE,
+}: {
+  result: QuizResultView;
+  onContinue: () => void;
+  coinsOnly?: boolean;
+  /** Lời chúc mừng (theo nhóm tuổi). */
+  title?: string;
+}) {
   const stickers = result.rewards.filter((r) => r.rewardType === 'sticker');
   const coins = result.coinsEarned ?? 0;
   return (
@@ -31,7 +42,7 @@ export function RewardCelebration({ result, onContinue, coinsOnly = false }: { r
         animate={{ scale: 1, rotate: 0 }}
         transition={{ type: 'spring', stiffness: 200, damping: 10 }}
       >
-        {PERFECT_MESSAGE}
+        {title}
       </motion.h1>
 
       <div className="relative my-4 flex items-end justify-center gap-2">
