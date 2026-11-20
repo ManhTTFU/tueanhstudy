@@ -26,8 +26,13 @@ import { AudioController } from '../audio/AudioController';
 
 export type QuizStage = 'loading' | 'playing' | 'submitting' | 'celebrate' | 'result' | 'locked' | 'unavailable';
 
+/** Thời gian tối thiểu hiện lời khen trước khi sang câu mới. */
 export const FEEDBACK_CORRECT_MS = 1700;
 export const FEEDBACK_WRONG_MS = 1700;
+/** Nghỉ ngắn sau khi đọc xong lời khen rồi mới đọc câu tiếp theo. */
+const PAUSE_AFTER_PRAISE_MS = 300;
+/** Chặn trên: mạng chậm / âm thanh bị treo thì vẫn sang câu mới, bé không phải chờ mãi. */
+const FEEDBACK_CORRECT_MAX_MS = 4500;
 
 export interface QuizResultView extends QuizResult {
   totalCandies?: number;
@@ -91,6 +96,8 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
     }
     if (myRun !== runId.current) return;
     AudioController.preload(['correct', 'wrong', 'celebrate'].map((s) => `/assets/sounds/sfx/${s}.wav`));
+    // Tải trước lời khen để đọc ngay khi bé trả lời đúng (iPhone tải file âm thanh chậm).
+    AudioController.preload(messages.praises.map((_, i) => `/assets/sounds/${praiseVoice(i, ageGroup).file}.m4a`));
     ui.preload?.(questions).forEach((src) => {
       const img = new Image();
       img.src = src;
@@ -180,8 +187,23 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
         setPraise(messages.praises[i]!);
         AudioController.sfx('correct');
         AnimationController.smallBurst();
-        later(() => void AudioController.speak(praiseVoice(i, ageGroup)), 250);
-        later(() => setState((s) => (s ? nextQuestion(s) : s)), FEEDBACK_CORRECT_MS);
+        // Sang câu mới khi ĐÃ đọc xong lời khen (câu hỏi mới sẽ ngắt giọng đang đọc),
+        // nhưng không sớm hơn FEEDBACK_CORRECT_MS và không muộn hơn FEEDBACK_CORRECT_MAX_MS.
+        const myRun = runId.current;
+        const shownAt = Date.now();
+        let advanced = false;
+        const advance = () => {
+          if (advanced || myRun !== runId.current) return;
+          advanced = true;
+          setState((s) => (s ? nextQuestion(s) : s));
+        };
+        later(() => {
+          void AudioController.speak(praiseVoice(i, ageGroup)).then(() => {
+            if (myRun !== runId.current) return;
+            later(advance, Math.max(PAUSE_AFTER_PRAISE_MS, FEEDBACK_CORRECT_MS - (Date.now() - shownAt)));
+          });
+        }, 250);
+        later(advance, FEEDBACK_CORRECT_MAX_MS);
       } else {
         AudioController.sfx('wrong');
         later(() => void AudioController.speak(phrases.tryAgain), 200);
