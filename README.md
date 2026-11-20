@@ -369,7 +369,7 @@ Phép cộng/trừ: payload kiểu `{ a, b, op }`, `correctAnswer = a ± b`, `Qu
 
 ### Cài lên iPhone / iPad (PWA)
 
-- Mở https://tueanhstudy.vercel.app/ bằng **Safari** → nút **Chia sẻ** → **Thêm vào MH chính**. Ứng dụng mở toàn màn hình với biểu tượng Mochi (trang chủ cũng có lời nhắc này; Android/Chrome có nút "Cài ứng dụng").
+- Mở https://tueanhstudy.vercel.app/ bằng **Safari** → nút **Chia sẻ** → **Thêm vào MH chính**. Ứng dụng mở toàn màn hình với biểu tượng Mochi (trang chủ luôn hiện hướng dẫn này trên mọi thiết bị, chỉ ẩn khi đã mở như ứng dụng; Chrome/Edge có thêm nút "Cài ứng dụng trên máy này").
 - Ứng dụng cài trên iPhone/iPad có bộ nhớ riêng với Safari ⇒ lần đầu mở cần **đăng nhập gia đình lại** (tên + mã gia đình).
 - `public/sw.js` (chỉ đăng ký ở bản build): trang mở được khi mất mạng; JS/CSS (`/static/`) và hình (`/assets/`) được lưu đệm; **không** lưu `/api/` và âm thanh. Muốn xoá bộ nhớ đệm cũ của mọi máy: tăng `VERSION` trong `sw.js`.
 - Biểu tượng: `public/icons/` (180 cho iOS, 192/512 và 512 maskable cho Android), khai báo trong `public/manifest.webmanifest` và `index.html`.
