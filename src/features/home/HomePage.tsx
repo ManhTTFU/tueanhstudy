@@ -20,9 +20,9 @@ import { AudioController } from '../audio/AudioController';
 import { PrimaryExtras } from '../primary/PrimaryExtras';
 
 export function HomePage() {
-  const { data: summary, error, reload } = useApiData(api.summary);
+  const { data: summary, error, reload } = useApiData(api.summary, 'summary');
   // Xu, kỷ lục, câu cần ôn, hạng tuần – chỉ dùng cho nhóm 5–9 tuổi.
-  const { data: overview, reload: reloadOverview } = useApiData(api.primaryOverview);
+  const { data: overview, error: overviewError, reload: reloadOverview } = useApiData(api.primaryOverview, 'primary-overview');
   const { ageGroup, setAgeGroup } = useSettings();
   const chapters = getHomeChapters(ageGroup);
   const navigate = useNavigate();
@@ -30,9 +30,9 @@ export function HomePage() {
   return (
     <PageShell>
       <AppHeader
-        progress={summary?.overallProgress ?? 0}
-        candies={summary?.totals.totalCandies ?? 0}
-        coins={ageGroup === 'primary' ? (overview?.coins.balance ?? 0) : undefined}
+        progress={summary?.overallProgress ?? (error ? 0 : null)}
+        candies={summary?.totals.totalCandies ?? (error ? 0 : null)}
+        coins={ageGroup === 'primary' ? (overview?.coins.balance ?? (overviewError ? 0 : null)) : undefined}
       />
 
       {error && (

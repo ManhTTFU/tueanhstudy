@@ -40,7 +40,7 @@ export function ChapterIntroPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [params, setParams] = useSearchParams();
-  const { data: summary } = useApiData(api.summary);
+  const { data: summary } = useApiData(api.summary, 'summary');
   // Đến từ "Chơi thôi!" sau khi học thẻ => mở sẵn bảng chọn trò chơi.
   const [choosing, setChoosing] = useState(() => Boolean((location.state as { chooseGame?: boolean } | null)?.chooseGame));
   useEffect(() => {

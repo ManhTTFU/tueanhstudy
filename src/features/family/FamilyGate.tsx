@@ -9,11 +9,14 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Mascot } from '../../components/Mascot';
 import { PageShell } from '../../components/ui';
 import { api, FAMILY_REQUIRED_EVENT, type RegistrationInfo } from '../../services/api';
+import { clearDataCache, forgetFamilyOnDevice, rememberFamilyLogin, wasFamilyLoggedIn } from '../../utils/storage';
 
 type GateState = { kind: 'checking' } | { kind: 'open' } | { kind: 'login'; registration: RegistrationInfo };
 
 export function FamilyGate({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<GateState>({ kind: 'checking' });
+  // Máy đã đăng nhập ở lần trước => mở app ngay, không chờ máy chủ; kiểm tra lại ở nền.
+  // Nếu phiên đã hết hạn, mọi API trả 401 family_required => quay về màn đăng nhập.
+  const [state, setState] = useState<GateState>(() => (wasFamilyLoggedIn() ? { kind: 'open' } : { kind: 'checking' }));
   // Đổi key => dựng lại toàn bộ ứng dụng để tải lại dữ liệu của gia đình vừa đăng nhập.
   const [generation, setGeneration] = useState(0);
 
@@ -22,9 +25,18 @@ export function FamilyGate({ children }: { children: ReactNode }) {
     const check = () =>
       api
         .familyStatus()
-        .then((s) => alive && setState(s.loggedIn ? { kind: 'open' } : { kind: 'login', registration: s.registration }))
+        .then((s) => {
+          if (!alive) return;
+          if (s.loggedIn) {
+            rememberFamilyLogin();
+            setState((prev) => (prev.kind === 'open' ? prev : { kind: 'open' }));
+          } else {
+            forgetFamilyOnDevice();
+            setState({ kind: 'login', registration: s.registration });
+          }
+        })
         // Mất mạng: cho vào chơi ngoại tuyến (kết quả không được lưu).
-        .catch(() => alive && setState({ kind: 'open' }));
+        .catch(() => alive && setState((prev) => (prev.kind === 'open' ? prev : { kind: 'open' })));
     void check();
     window.addEventListener(FAMILY_REQUIRED_EVENT, check);
     return () => {
@@ -33,12 +45,15 @@ export function FamilyGate({ children }: { children: ReactNode }) {
     };
   }, [generation]);
 
-  if (state.kind === 'checking') return null;
+  if (state.kind === 'checking') return <GateSplash />;
   if (state.kind === 'login') {
     return (
       <FamilyLogin
         registration={state.registration}
         onDone={() => {
+          // Có thể là gia đình khác => bỏ số liệu đệm của gia đình cũ.
+          clearDataCache();
+          rememberFamilyLogin();
           setState({ kind: 'checking' });
           setGeneration((g) => g + 1);
         }}
@@ -49,6 +64,18 @@ export function FamilyGate({ children }: { children: ReactNode }) {
     <div key={generation} className="contents">
       {children}
     </div>
+  );
+}
+
+/** Màn chờ (chỉ khi máy chưa từng đăng nhập) – thay cho màn hình trắng. */
+function GateSplash() {
+  return (
+    <PageShell>
+      <div className="flex min-h-[80vh] flex-col items-center justify-center gap-4" role="status" aria-live="polite">
+        <Mascot mood="happy" size={140} />
+        <p className="text-2xl font-extrabold text-ink/60">Đang tải…</p>
+      </div>
+    </PageShell>
   );
 }
 

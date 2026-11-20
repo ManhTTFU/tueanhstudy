@@ -9,7 +9,7 @@ import { getEnabledChapters } from '../../chapters/registry';
 import { BackButton, LoadingMascotDots, PageShell } from '../../components/ui';
 import { getSticker, stickerImage } from '../../data/stickers';
 import { api, ApiClientError, type HistoryPage, type ParentStats, type SessionDetail, type ShopView, type StickerCount } from '../../services/api';
-import { formatDateTime } from '../../utils/storage';
+import { forgetFamilyOnDevice, formatDateTime } from '../../utils/storage';
 import { ParentGate } from './ParentGate';
 
 type Tab = 'stats' | 'history' | 'settings' | 'data' | 'gifts';
@@ -556,7 +556,10 @@ function FamilyPanel({ guard }: { guard: Guard }) {
               void api
                 .familyLogout()
                 .catch(() => undefined)
-                .finally(() => window.location.assign('/'));
+                .finally(() => {
+                  forgetFamilyOnDevice();
+                  window.location.assign('/');
+                });
             }}
             data-testid="family-logout"
           >

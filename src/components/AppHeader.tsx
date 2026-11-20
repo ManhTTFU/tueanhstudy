@@ -6,8 +6,16 @@ import { AudioController } from '../features/audio/AudioController';
 import { Mascot } from './Mascot';
 import { HoldButton, ProgressBar } from './ui';
 
-/** `coins` có giá trị (nhóm 5–9 tuổi) => hiện xu thay cho kẹo. */
-export function AppHeader({ progress, candies, coins }: { progress: number; candies: number; coins?: number | undefined }) {
+/** Khung chờ nhấp nháy khi chưa có số liệu (lần đầu mở app trên máy). */
+function Pending({ className }: { className: string }) {
+  return <span className={`inline-block animate-pulse rounded-full bg-ink/10 ${className}`} aria-hidden />;
+}
+
+/**
+ * `coins` có giá trị (nhóm 5–9 tuổi) => hiện xu thay cho kẹo.
+ * `null` = đang tải lần đầu => hiện khung chờ thay vì số 0.
+ */
+export function AppHeader({ progress, candies, coins }: { progress: number | null; candies: number | null; coins?: number | null | undefined }) {
   const { soundEnabled, setSoundEnabled } = useSettings();
   const navigate = useNavigate();
   return (
@@ -29,22 +37,26 @@ export function AppHeader({ progress, candies, coins }: { progress: number; cand
 
       <div className="order-last flex w-full flex-1 items-center gap-3 sm:order-none sm:w-auto">
         <span className="text-sm font-bold text-ink/60">Tiến độ</span>
-        <ProgressBar value={progress} label="Tiến độ học tập" color="#4FD08F" />
-        <span className="w-12 text-right text-lg font-extrabold">{progress}%</span>
+        {progress === null ? (
+          <Pending className="h-5 w-full" />
+        ) : (
+          <ProgressBar value={progress} label="Tiến độ học tập" color="#4FD08F" />
+        )}
+        <span className="w-12 text-right text-lg font-extrabold">{progress === null ? <Pending className="h-5 w-10" /> : `${progress}%`}</span>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
         {coins !== undefined ? (
-          <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={`${coins} xu`} data-testid="header-coins">
+          <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={coins === null ? 'Đang tải xu' : `${coins} xu`} data-testid="header-coins">
             <span className="text-3xl" aria-hidden>
               🪙
             </span>
-            {coins}
+            {coins === null ? <Pending className="h-6 w-8" /> : coins}
           </span>
         ) : (
-          <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={`${candies} viên kẹo`}>
-            <img src="/assets/rewards/candy.svg" alt="" className="h-10 w-10" />
-            {candies}
+          <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={candies === null ? 'Đang tải kẹo' : `${candies} viên kẹo`}>
+            <img src="/assets/rewards/candy.svg" alt="" width={40} height={40} decoding="async" className="h-10 w-10" />
+            {candies === null ? <Pending className="h-6 w-8" /> : candies}
           </span>
         )}
         <button
