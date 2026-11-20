@@ -6,7 +6,7 @@ import { Eye, Lock, Volume2, WifiOff } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Navigate, useParams } from 'react-router-dom';
-import { chapterPagePath } from '../chapter/ChapterPages';
+import { chapterBackTarget, chapterPagePath } from '../chapter/ChapterPages';
 import { chapterAgeGroup, getChapter } from '../../chapters/registry';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { Mascot } from '../../components/Mascot';
@@ -85,7 +85,16 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
   if (stage === 'result' && result) {
     return (
       <PageShell>
-        <ResultScreen result={result} onReplay={() => void quiz.restart()} onRetrySave={quiz.retrySave} coinsOnly={chapterAgeGroup(chapter) === 'primary'} />
+        <ResultScreen
+          result={result}
+          onReplay={() => void quiz.restart()}
+          onChooseOther={() => {
+            const { to, state } = chapterBackTarget(chapter);
+            navigate(to, { state });
+          }}
+          onRetrySave={quiz.retrySave}
+          coinsOnly={chapterAgeGroup(chapter) === 'primary'}
+        />
       </PageShell>
     );
   }

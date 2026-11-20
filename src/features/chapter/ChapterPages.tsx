@@ -35,6 +35,14 @@ export function chapterPagePath(chapter: AnyChapter): string {
   return `/chuong/${groupRootId(chapter)}${level > 1 ? `?cap=${level}` : ''}`;
 }
 
+/**
+ * Quay về trang chương để chọn bài khác; cấp có nhiều trò chơi => mở sẵn bảng chọn trò chơi.
+ */
+export function chapterBackTarget(chapter: AnyChapter): { to: string; state?: { chooseGame: true } } {
+  const levelGames = getLevels(groupRootId(chapter)).find((l) => l.level === chapterLevel(chapter))?.games ?? [chapter];
+  return { to: chapterPagePath(chapter), ...(levelGames.length > 1 ? { state: { chooseGame: true } } : {}) };
+}
+
 export function ChapterIntroPage() {
   const found = useChapterParams();
   const navigate = useNavigate();
@@ -257,8 +265,8 @@ export function LearningPage() {
   if (!found || !found.ui.Learning) return <Navigate to="/" replace />;
   const { chapter, ui } = found;
   const View = ui.Learning!.View;
-  const backTo = chapterPagePath(chapter);
-  const levelGames = getLevels(groupRootId(chapter)).find((l) => l.level === chapterLevel(chapter))?.games ?? [chapter];
+  const back = chapterBackTarget(chapter);
+  const backTo = back.to;
   return (
     <PageShell>
       <div className="mb-3 flex items-center gap-3">
@@ -270,7 +278,7 @@ export function LearningPage() {
       <View
         onFinished={() => {
           api.completeLearning(chapter.id).catch(() => undefined);
-          if (levelGames.length > 1) navigate(backTo, { state: { chooseGame: true } });
+          if (back.state) navigate(backTo, { state: back.state });
           else navigate(`/chuong/${chapter.id}/choi`);
         }}
       />

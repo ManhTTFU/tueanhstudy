@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { CheckCircle2, Clock, Gift, Home, Percent, RotateCcw, Sparkles, Target } from 'lucide-react';
+import { CheckCircle2, Clock, Gift, Home, LayoutGrid, Percent, RotateCcw, Sparkles, Target } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Mascot } from '../../components/Mascot';
 import { Stars } from '../../components/ui';
@@ -112,11 +112,14 @@ export function RewardCelebration({
 export function ResultScreen({
   result,
   onReplay,
+  onChooseOther,
   onRetrySave,
   coinsOnly = false,
 }: {
   result: QuizResultView;
   onReplay: () => void;
+  /** Về trang chương để chọn bài / trò chơi khác. */
+  onChooseOther: () => void;
   onRetrySave: () => void;
   /** Nhóm 5–9 tuổi: không có hộp quà (thưởng bằng xu). */
   coinsOnly?: boolean;
@@ -185,6 +188,9 @@ export function ResultScreen({
       )}
 
       <div className="mt-2 flex w-full flex-col gap-3 sm:flex-row">
+        <button type="button" className="kid-btn flex-1 bg-mint-500 text-white" onClick={onChooseOther} data-testid="choose-other">
+          <LayoutGrid size={30} strokeWidth={3} /> Chọn bài khác
+        </button>
         <button type="button" className="kid-btn flex-1 bg-sunny-400 text-ink" onClick={onReplay} data-testid="replay">
           <RotateCcw size={30} strokeWidth={3} /> Chơi lại
         </button>
