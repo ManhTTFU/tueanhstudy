@@ -7,12 +7,12 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Navigate, useParams } from 'react-router-dom';
 import { chapterPagePath } from '../chapter/ChapterPages';
-import { getChapter } from '../../chapters/registry';
+import { chapterAgeGroup, getChapter } from '../../chapters/registry';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { Mascot } from '../../components/Mascot';
 import { BackButton, LoadingMascotDots, PageShell, ProgressBar } from '../../components/ui';
 import { getCurrentQuestion, getTriedWrongOptions } from '../../engine/QuizSession';
-import { AnswerOptions, FeedbackBubble } from './QuizComponents';
+import { AnswerOptions, FeedbackBubble, NumberPad } from './QuizComponents';
 import { ResultScreen, RewardCelebration } from './ResultScreens';
 import { useQuiz } from './useQuiz';
 import type { AnyChapter } from '../../chapters/registry';
@@ -64,14 +64,28 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
     );
   }
 
+  if (stage === 'unavailable') {
+    return (
+      <PageShell className="flex items-center justify-center">
+        <div className="card mt-16 flex max-w-md flex-col items-center gap-4 p-6 text-center" data-testid="quiz-unavailable">
+          <Mascot mood="cheer" size={130} />
+          <p className="text-2xl font-extrabold">{quiz.unavailable}</p>
+          <button type="button" className="kid-btn w-full bg-sunny-400 text-ink" onClick={() => navigate('/')}>
+            Về trang chủ
+          </button>
+        </div>
+      </PageShell>
+    );
+  }
+
   if (stage === 'celebrate' && result) {
-    return <RewardCelebration result={result} onContinue={quiz.showResult} />;
+    return <RewardCelebration result={result} onContinue={quiz.showResult} coinsOnly={chapterAgeGroup(chapter) === 'primary'} />;
   }
 
   if (stage === 'result' && result) {
     return (
       <PageShell>
-        <ResultScreen result={result} onReplay={() => void quiz.restart()} onRetrySave={quiz.retrySave} />
+        <ResultScreen result={result} onReplay={() => void quiz.restart()} onRetrySave={quiz.retrySave} coinsOnly={chapterAgeGroup(chapter) === 'primary'} />
       </PageShell>
     );
   }
@@ -124,8 +138,17 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
         </button>
 
         {/* Key phải khác nhau giữa 2 phần tử cùng cấp, nếu trùng React giữ lại hình của câu cũ. */}
-        <QuestionView key={`view-${question.id}`} question={question} />
+        <QuestionView key={`view-${question.id}`} question={question} wrongTries={getTriedWrongOptions(state).length} />
 
+        {question.input ? (
+          <NumberPad
+            key={`pad-${question.id}`}
+            phase={state.phase}
+            correctAnswer={question.correctAnswer}
+            triedWrong={getTriedWrongOptions(state)}
+            onSubmit={quiz.answer}
+          />
+        ) : (
         <DelayedReveal key={`options-${question.id}`} delayMs={ui.optionsDelayMs?.(question) ?? 0}>
           <AnswerOptions
             options={question.options}
@@ -138,6 +161,7 @@ function QuizRunner({ chapter, ui }: { chapter: AnyChapter; ui: ChapterUI }) {
             optionLabel={ui.optionLabel ? (v) => ui.optionLabel!(v, question) : undefined}
           />
         </DelayedReveal>
+        )}
       </div>
 
       <FeedbackBubble phase={state.phase} praise={quiz.praise} />

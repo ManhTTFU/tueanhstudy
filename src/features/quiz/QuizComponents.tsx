@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Check, Delete } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Mascot } from '../../components/Mascot';
 import { NumberWithDots } from '../../components/NumberDots';
 import { TRY_AGAIN_MESSAGE } from '../../engine/messages';
@@ -108,5 +108,97 @@ export function FeedbackBubble({ phase, praise }: { phase: QuizPhase; praise: st
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+const MAX_INPUT_DIGITS = 5;
+
+interface NumberPadProps {
+  phase: QuizPhase;
+  correctAnswer: AnswerValue;
+  triedWrong: AnswerValue[];
+  onSubmit: (v: AnswerValue) => void;
+}
+
+/** Bàn phím số cho câu tự gõ đáp án (dùng chung; nhận cả bàn phím máy tính). */
+export function NumberPad({ phase, correctAnswer, triedWrong, onSubmit }: NumberPadProps) {
+  const [buf, setBuf] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const locked = phase !== 'answering';
+
+  // Sai => xoá số vừa nhập để bé gõ lại.
+  useEffect(() => {
+    if (phase === 'wrong') setBuf('');
+  }, [phase]);
+
+  const press = useCallback(
+    (k: string) => {
+      if (locked) return;
+      setNote(null);
+      if (k === 'del') return setBuf((b) => b.slice(0, -1));
+      if (k === 'ok') {
+        if (!buf) return;
+        const v = Number(buf);
+        if (triedWrong.includes(v)) {
+          setNote('Con đã thử số này rồi, thử số khác nhé!');
+          setBuf('');
+          return;
+        }
+        onSubmit(v);
+        return;
+      }
+      setBuf((b) => (b.length >= MAX_INPUT_DIGITS ? b : (b === '0' ? '' : b) + k));
+    },
+    [buf, locked, onSubmit, triedWrong],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (/^[0-9]$/.test(e.key)) press(e.key);
+      else if (e.key === 'Backspace') press('del');
+      else if (e.key === 'Enter') press('ok');
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [press]);
+
+  const shown = phase === 'correct' ? String(correctAnswer) : buf;
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'];
+  return (
+    <div className="flex w-full max-w-sm flex-col items-center gap-3" data-testid="number-pad">
+      <motion.div
+        key={phase === 'wrong' ? 'wrong' : 'input'}
+        animate={phase === 'wrong' ? { x: [0, -10, 10, -6, 6, 0] } : phase === 'correct' ? { scale: [1, 1.12, 1] } : {}}
+        transition={{ duration: 0.45 }}
+        className={`flex h-20 w-full items-center justify-center rounded-3xl border-[5px] text-5xl font-extrabold tabular-nums ${
+          phase === 'correct' ? 'border-mint-400 bg-mint-100 text-mint-500' : 'border-grape-300 bg-white text-ink'
+        }`}
+        data-testid="pad-display"
+        aria-live="polite"
+      >
+        {shown || <span className="text-ink/25">?</span>}
+        {phase === 'correct' && <Check size={40} strokeWidth={4} className="ml-2" />}
+      </motion.div>
+      {note && <p className="text-lg font-bold text-sky-500">{note}</p>}
+      <div className="grid w-full grid-cols-3 gap-2" role="group" aria-label="Bàn phím số">
+        {keys.map((k) => (
+          <button
+            key={k}
+            type="button"
+            disabled={locked || (k === 'ok' && !buf)}
+            onClick={() => press(k)}
+            data-testid={`pad-${k}`}
+            aria-label={k === 'del' ? 'Xoá' : k === 'ok' ? 'Trả lời' : `Số ${k}`}
+            className={`flex h-16 items-center justify-center rounded-2xl text-3xl font-extrabold shadow-pop-sm active:translate-y-0.5 disabled:opacity-40 ${
+              k === 'ok' ? 'bg-mint-400 text-white' : k === 'del' ? 'bg-peach-100 text-peach-500' : 'bg-white text-ink'
+            }`}
+          >
+            {k === 'del' ? <Delete size={30} /> : k === 'ok' ? <Check size={34} strokeWidth={4} /> : k}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

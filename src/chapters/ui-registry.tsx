@@ -4,7 +4,7 @@
  *
  * Thêm chương mới = thêm 1 mục vào CHAPTER_UI (cùng id với registry.ts).
  */
-import { BookOpen, Brain, Calculator, Clock, Compass, Hash as HashIcon, Palette, Puzzle, Scale, ShoppingBasket, Triangle, Type, Eye, Lightbulb, Shapes, Sparkles, Target, Hash, Minus, PawPrint, Plus, Search, type LucideIcon } from 'lucide-react';
+import { KeyRound, Undo2, BookOpen, Brain, Calculator, Clock, Compass, Hash as HashIcon, Palette, Puzzle, Scale, ShoppingBasket, Triangle, Type, Eye, Lightbulb, Shapes, Sparkles, Target, Hash, Minus, PawPrint, Plus, Search, type LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { objectImage } from '../data/objects/catalog';
 import { findNumberVoice, VOICE_PHRASES, type VoiceLine } from '../data/voice';
@@ -19,6 +19,9 @@ import { flashMs, speechFile, speechOf, type DadaPayload } from './dada/kit';
 import type { ArithmeticPayload } from './arithmetic/generator';
 import { arithmeticSpeech, arithmeticVoiceFile } from './arithmetic/operations';
 import type { Question } from '../engine/types';
+import { PrimaryIllustration, PrimaryOption, primaryOptionLabel, PrimaryQuestionView } from './primary/components/PrimaryViews';
+import { MENTAL_ROOT_ID, primaryChapters, PRIMARY_TOPIC_OF, THINK_HUB_ID } from './primary/config';
+import { speechOfPrimary, type PrimaryPayload } from './primary/kit';
 import { FindingIllustration, FindingQuestionView } from './number-finding/components/FindingViews';
 import type { NumberFindingPayload } from './number-finding/generator';
 import { NumberFlashcards } from './number-recognition/components/NumberFlashcards';
@@ -32,7 +35,8 @@ import type { ObjectCountingPayload } from './object-counting/generator';
 export interface ChapterUI<P = Record<string, unknown>> {
   Icon: LucideIcon;
   Illustration: ComponentType;
-  QuestionView: ComponentType<{ question: Question<P> }>;
+  /** `wrongTries`: số lần bé đã trả lời sai câu này (vd. để hiện gợi ý từng bước). */
+  QuestionView: ComponentType<{ question: Question<P>; wrongTries?: number }>;
   /** Giai đoạn học trước khi kiểm tra (nếu có). */
   Learning?: { label: string; Icon: LucideIcon; View: ComponentType<{ onFinished: () => void }> };
   introVoice: VoiceLine;
@@ -152,12 +156,44 @@ function brainUI(chapterId: string): ChapterUI<BrainPayload> {
   };
 }
 
+const PRIMARY_ICONS: Record<string, LucideIcon> = {
+  compare: Scale,
+  reverse: Undo2,
+  symbols: KeyRound,
+  patterns: Puzzle,
+  time: Clock,
+  logic: Search,
+  digits: HashIcon,
+};
+
+/** Giao diện chung nhóm 5–9 tuổi: đề bài đọc bằng giọng hệ thống (đề sinh ngẫu nhiên, không có file ghi âm). */
+function primaryUI(chapterId: string): ChapterUI<PrimaryPayload> {
+  const topic = PRIMARY_TOPIC_OF.get(chapterId);
+  const look =
+    chapterId === MENTAL_ROOT_ID || chapterId.startsWith(`${MENTAL_ROOT_ID}-`)
+      ? { Icon: Calculator, emoji: '🧮' }
+      : chapterId === THINK_HUB_ID
+        ? { Icon: Lightbulb, emoji: '💡' }
+        : { Icon: PRIMARY_ICONS[topic?.id ?? ''] ?? Lightbulb, emoji: topic?.icon ?? '💡' };
+  const Illustration = () => <PrimaryIllustration emoji={look.emoji} />;
+  return {
+    Icon: look.Icon,
+    Illustration,
+    QuestionView: PrimaryQuestionView,
+    introVoice: { file: '', text: topic?.name ?? (chapterId === THINK_HUB_ID ? 'Tư duy toán' : 'Tính nhẩm') },
+    promptVoice: (q) => ({ file: '', text: speechOfPrimary(q) }),
+    OptionContent: PrimaryOption,
+    optionLabel: primaryOptionLabel,
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CHAPTER_UI: Record<string, ChapterUI<any>> = {
   'number-recognition': numberRecognitionUI,
   'object-counting': objectCountingUI,
   'number-finding': numberFindingUI,
   ...Object.fromEntries(dadaChapters.map((c) => [c.id, dadaUI(c.id)])),
+  ...Object.fromEntries(primaryChapters.map((c) => [c.id, primaryUI(c.id)])),
   ...Object.fromEntries(brainChapters.map((c) => [c.id, brainUI(c.id)])),
   ...Object.fromEntries(arithmeticChapters.map((c) => [c.id, arithmeticUI(c.id, ARITHMETIC_OP_OF.get(c.id)!)])),
   // Các cấp 11–20, ...: dùng lại giao diện cấp 1–10, thẻ học theo phạm vi của cấp.

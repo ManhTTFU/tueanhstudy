@@ -23,7 +23,7 @@ import { api, ApiClientError } from '../../services/api';
 import { AnimationController } from '../animation/AnimationController';
 import { AudioController } from '../audio/AudioController';
 
-export type QuizStage = 'loading' | 'playing' | 'submitting' | 'celebrate' | 'result' | 'locked';
+export type QuizStage = 'loading' | 'playing' | 'submitting' | 'celebrate' | 'result' | 'locked' | 'unavailable';
 
 export const FEEDBACK_CORRECT_MS = 1700;
 export const FEEDBACK_WRONG_MS = 1700;
@@ -31,6 +31,7 @@ export const FEEDBACK_WRONG_MS = 1700;
 export interface QuizResultView extends QuizResult {
   totalCandies?: number;
   giftsAvailable?: number;
+  coinsEarned?: number;
 }
 
 export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
@@ -39,6 +40,8 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
   const [result, setResult] = useState<QuizResultView | null>(null);
   const [praise, setPraise] = useState('');
   const [offline, setOffline] = useState(false);
+  /** Lý do không có bài (vd. "Chưa có câu sai nào để ôn"). */
+  const [unavailable, setUnavailable] = useState('');
   const timers = useRef<number[]>([]);
   const submitted = useRef(false);
   const runId = useRef(0);
@@ -67,6 +70,14 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
       // Cấp chưa mở khoá (server chặn): không cho chơi ngoại tuyến để lách luật.
       if (e instanceof ApiClientError && e.status === 403) {
         if (myRun === runId.current) setStage('locked');
+        return;
+      }
+      // Không có bài để làm (vd. danh sách câu sai đang trống).
+      if (e instanceof ApiClientError && e.status === 409) {
+        if (myRun === runId.current) {
+          setUnavailable(e.message);
+          setStage('unavailable');
+        }
         return;
       }
       // Ngoại tuyến / lỗi máy chủ: bé vẫn chơi được, nhưng kết quả không được lưu.
@@ -181,6 +192,7 @@ export function useQuiz(chapter: AnyChapter, ui: ChapterUI) {
     result,
     praise,
     offline,
+    unavailable,
     answer,
     restart: start,
     repeatPrompt,

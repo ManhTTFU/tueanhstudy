@@ -66,6 +66,11 @@ class AudioControllerImpl {
   speak(line: VoiceLine): Promise<void> {
     if (!this.enabled) return Promise.resolve();
     this.stopVoice();
+    // Không có file ghi âm (vd. đề bài nhóm 5–9 tuổi sinh ngẫu nhiên): dùng giọng đọc hệ thống.
+    if (!line.file) {
+      this.speakWithSystemVoice(line.text);
+      return Promise.resolve();
+    }
     const token = ++this.voiceToken;
     const el = this.element(`/assets/sounds/${line.file}.m4a`);
     this.voice = el;

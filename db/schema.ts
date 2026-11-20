@@ -36,6 +36,7 @@ export interface StoredQuestion {
   payload: Record<string, unknown>;
   correctAnswer: number;
   options: number[];
+  input?: boolean;
 }
 
 /** Mỗi gia đình một dòng: đăng nhập (tên + mã gia đình), PIN phụ huynh, cài đặt. */
@@ -61,6 +62,8 @@ export const families = pgTable(
     pinLockedUntil: timestamp('pin_locked_until', { withTimezone: true }),
     soundEnabled: boolean('sound_enabled').notNull().default(true),
     reducedMotion: boolean('reduced_motion').notNull().default(false),
+    /** Nhóm tuổi đang chọn ở trang chủ: 'preschool' (3–5 tuổi) | 'primary' (5–9 tuổi). */
+    ageGroup: text('age_group').notNull().default('preschool'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -207,6 +210,89 @@ export const chapterProgress = pgTable(
   (t) => [uniqueIndex('chapter_progress_family_chapter_uq').on(t.familyId, t.chapterId)],
 );
 
+// ===================== Nhóm 5–9 tuổi =====================
+
+/**
+ * Sổ xu (chỉ ghi phần KIẾM được, luôn > 0). Xu còn lại = tổng sổ xu − tổng giá quà đã đổi.
+ * `dedupe_key` chống cộng trùng: `session:<id>:coin`, `challenge:<id>:coin`.
+ */
+export const coinLedger = pgTable(
+  'coin_ledger',
+  {
+    id: serial('id').primaryKey(),
+    familyId: familyRef(),
+    amount: integer('amount').notNull(),
+    /** session | challenge */
+    reason: text('reason').notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    earnedAt: timestamp('earned_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('coin_ledger_family_dedupe_uq').on(t.familyId, t.dedupeKey),
+    index('coin_ledger_earned_idx').on(t.earnedAt),
+    check('coin_ledger_amount_check', sql`${t.amount} > 0`),
+  ],
+);
+
+/** Quà thật do phụ huynh đặt (đổi bằng xu). Xoá = ẩn (active = false) để lịch sử đổi quà còn tên. */
+export const shopRewards = pgTable(
+  'shop_rewards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    familyId: familyRef(),
+    name: text('name').notNull(),
+    cost: integer('cost').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [index('shop_rewards_family_idx').on(t.familyId), check('shop_rewards_cost_check', sql`${t.cost} > 0`)],
+);
+
+/** Lượt đổi quà. `id` do client sinh (UUID) => bấm lặp không trừ xu hai lần. */
+export const redemptions = pgTable(
+  'redemptions',
+  {
+    id: uuid('id').primaryKey(),
+    familyId: familyRef(),
+    rewardId: uuid('reward_id').references(() => shopRewards.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    cost: integer('cost').notNull(),
+    redeemedAt: timestamp('redeemed_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Bố mẹ đã trao quà (null = chưa). */
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  },
+  (t) => [index('redemptions_family_idx').on(t.familyId, t.redeemedAt), check('redemptions_cost_check', sql`${t.cost} > 0`)],
+);
+
+/** Câu bé làm sai lần đầu (nhóm 5–9 tuổi) – dùng cho "Ôn câu sai". `item_key` = `<chương>|<id câu>`. */
+export const reviewItems = pgTable(
+  'review_items',
+  {
+    id: serial('id').primaryKey(),
+    familyId: familyRef(),
+    itemKey: text('item_key').notNull(),
+    chapterId: text('chapter_id').notNull(),
+    question: jsonb('question').$type<StoredQuestion>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('review_items_family_key_uq').on(t.familyId, t.itemKey)],
+);
+
+/** Lượt "Thử thách 60 giây": server sinh đề & tự chấm. */
+export const challengeRuns = pgTable(
+  'challenge_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    familyId: familyRef(),
+    questions: jsonb('questions').$type<{ id: string; text: string; answer: number }[]>().notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    correct: integer('correct').notNull().default(0),
+    wrong: integer('wrong').notNull().default(0),
+  },
+  (t) => [index('challenge_runs_family_idx').on(t.familyId, t.completedAt)],
+);
+
 /** Cấu hình chung của hệ thống (1 dòng duy nhất): khoá bí mật ký cookie. */
 export const appSettings = pgTable(
   'app_settings',
@@ -226,6 +312,11 @@ export const schema = {
   giftOpenings,
   rewards,
   chapterProgress,
+  coinLedger,
+  shopRewards,
+  redemptions,
+  reviewItems,
+  challengeRuns,
   appSettings,
 };
 
@@ -235,5 +326,7 @@ export type QuizAnswerRow = typeof quizAnswers.$inferSelect;
 export type RewardRow = typeof rewards.$inferSelect;
 export type GiftOpeningRow = typeof giftOpenings.$inferSelect;
 export type ChapterProgressRow = typeof chapterProgress.$inferSelect;
+export type ShopRewardRow = typeof shopRewards.$inferSelect;
+export type RedemptionRow = typeof redemptions.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type FamilyRow = typeof families.$inferSelect;

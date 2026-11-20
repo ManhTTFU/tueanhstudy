@@ -7,17 +7,22 @@ import { MotionConfig } from 'framer-motion';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimationController } from '../features/animation/AnimationController';
 import { AudioController } from '../features/audio/AudioController';
+import type { AgeGroup } from '../engine/types';
 import { api } from '../services/api';
 import { readLocal, writeLocal } from '../utils/storage';
 
 interface SettingsState {
   soundEnabled: boolean;
   reducedMotion: boolean;
+  /** Nhóm tuổi đang chọn ở trang chủ (3–5 tuổi / 5–9 tuổi). */
+  ageGroup: AgeGroup;
 }
 
 interface SettingsContextValue extends SettingsState {
   setSoundEnabled: (v: boolean) => void;
   setReducedMotion: (v: boolean) => void;
+  /** Lưu nhóm tuổi; Promise xong khi server đã lưu (để tải lại tiến độ theo nhóm mới). */
+  setAgeGroup: (v: AgeGroup) => Promise<void>;
   /** Đồng bộ từ server (ví dụ sau khi nhập dữ liệu). */
   applyServerSettings: (s: Partial<SettingsState>) => void;
 }
@@ -33,6 +38,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SettingsState>(() => ({
     soundEnabled: true,
     reducedMotion: systemPrefersReducedMotion(),
+    ageGroup: 'preschool',
     ...readLocal<SettingsState>(CACHE_KEY),
   }));
 
@@ -45,20 +51,26 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     api
       .settings()
-      .then((s) => setState({ soundEnabled: s.soundEnabled, reducedMotion: s.reducedMotion || systemPrefersReducedMotion() }))
+      .then((s) =>
+        setState({ soundEnabled: s.soundEnabled, reducedMotion: s.reducedMotion || systemPrefersReducedMotion(), ageGroup: s.ageGroup ?? 'preschool' }),
+      )
       .catch(() => undefined);
   }, []);
 
   const update = useCallback((patch: Partial<SettingsState>) => {
     setState((prev) => ({ ...prev, ...patch }));
-    api.updateSettings(patch).catch(() => undefined);
+    return api.updateSettings(patch).then(
+      () => undefined,
+      () => undefined,
+    );
   }, []);
 
   const value = useMemo<SettingsContextValue>(
     () => ({
       ...state,
-      setSoundEnabled: (v) => update({ soundEnabled: v }),
-      setReducedMotion: (v) => update({ reducedMotion: v }),
+      setSoundEnabled: (v) => void update({ soundEnabled: v }),
+      setReducedMotion: (v) => void update({ reducedMotion: v }),
+      setAgeGroup: (v) => update({ ageGroup: v }),
       applyServerSettings: (s) => setState((prev) => ({ ...prev, ...s })),
     }),
     [state, update],

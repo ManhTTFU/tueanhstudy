@@ -18,8 +18,13 @@ export interface Question<P = Record<string, unknown>> {
   /** Dữ liệu riêng của từng loại câu hỏi (số cần nhận biết, hình cần đếm, ...). */
   payload: P;
   correctAnswer: AnswerValue;
-  /** Các phương án đã xáo trộn – luôn chứa `correctAnswer` đúng 1 lần. */
+  /**
+   * Các phương án đã xáo trộn – luôn chứa `correctAnswer` đúng 1 lần.
+   * Rỗng khi `input` = true (bé tự gõ đáp án).
+   */
   options: AnswerValue[];
+  /** Bé tự gõ đáp án bằng bàn phím số thay vì chọn phương án (nhóm 5–9 tuổi). */
+  input?: boolean;
 }
 
 export interface NumberRange {
@@ -48,8 +53,14 @@ export interface ChapterRewardConfig {
 }
 
 /** Cấu hình thuần (không có UI) của một chương học – dùng chung cho client & server. */
+/** Nhóm tuổi: 'preschool' = bé 3–5 tuổi, 'primary' = bé 5–9 tuổi (tiểu học). */
+export type AgeGroup = 'preschool' | 'primary';
+export const AGE_GROUPS: readonly AgeGroup[] = ['preschool', 'primary'];
+
 export interface ChapterDefinition<P = Record<string, unknown>> {
   id: string;
+  /** Nhóm tuổi của chương (mặc định 'preschool'). Trang chủ chỉ hiện chương của nhóm đang chọn. */
+  ageGroup?: AgeGroup;
   name: string;
   description: string;
   /** Tên biểu tượng (Lucide) – phần UI tự ánh xạ. */
@@ -75,6 +86,12 @@ export interface ChapterDefinition<P = Record<string, unknown>> {
   hubId?: string;
   /** Chương chỉ là "cửa vào" các chương con theo `hubId` – không có bài, không tính tiến độ. */
   hubOnly?: boolean;
+  /**
+   * Bài "Ôn câu sai": server lấy câu hỏi từ danh sách câu bé từng làm sai (review_items)
+   * thay vì generator (generator chỉ dùng khi chơi ngoại tuyến). Không hiện ở trang chủ,
+   * không tính tiến độ.
+   */
+  review?: boolean;
   /** Tên cấp hiển thị (mặc định "min–max" theo range), ví dụ "Phạm vi 5". */
   levelLabel?: string;
   /** Tên đầy đủ lưu trong lịch sử / thống kê (mặc định `name`), ví dụ "Phép cộng phạm vi 5". */

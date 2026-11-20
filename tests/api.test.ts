@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { quizSessions, rewards } from '../db/schema';
+import { challengeRuns, quizSessions, rewards } from '../db/schema';
 import { createPgliteDatabase } from '../dev/localDb';
 import type { Database } from '../server/db';
 import { resetRateLimits } from '../server/rateLimit';
@@ -106,7 +106,7 @@ async function playQuiz(chapterId: string, wrongOnFirst = 0) {
   const { sessionId, questions } = start.body as { sessionId: string; questions: Question[] };
   await ageSession(sessionId);
   const answers = questions.map((q, i) => {
-    const wrong = q.options.find((o) => o !== q.correctAnswer)!;
+    const wrong = q.input ? q.correctAnswer + 1 : q.options.find((o) => o !== q.correctAnswer)!;
     return { questionId: q.id, attempts: i < wrongOnFirst ? [wrong, q.correctAnswer] : [q.correctAnswer] };
   });
   const complete = await call('POST', `quiz/sessions/${sessionId}/complete`, { answers });
@@ -296,7 +296,7 @@ describe('Khu vực phụ huynh & bảo mật', () => {
     const exported = await call('GET', 'backup/export', undefined, { auth: true });
     expect(exported.status).toBe(200);
     const backup = exported.body as { schemaVersion: number; format: string; data: { sessions: unknown[]; rewards: unknown[] } };
-    expect(backup).toMatchObject({ format: 'be-vui-hoc-toan-backup', schemaVersion: 1 });
+    expect(backup).toMatchObject({ format: 'be-vui-hoc-toan-backup', schemaVersion: 2 });
     expect(backup.data.sessions).toHaveLength(12);
     expect(JSON.stringify(backup)).not.toMatch(/pin_?hash|sessionSecret/i);
     const summaryBefore = (await call('GET', 'summary')).body;
@@ -606,5 +606,178 @@ describe('Nhiều gia đình (cơ sở dữ liệu riêng)', () => {
     } finally {
       await fresh.close();
     }
+  });
+});
+
+describe('Nhóm 5–9 tuổi (API)', () => {
+  it('lưu nhóm tuổi trong cài đặt gia đình; dữ liệu sai => 400', async () => {
+    expect((await call('GET', 'settings')).body).toMatchObject({ ageGroup: 'preschool' });
+    expect((await call('PUT', 'settings', { ageGroup: 'teen' })).status).toBe(400);
+    expect((await call('PUT', 'settings', { ageGroup: 'primary' })).body).toMatchObject({ ageGroup: 'primary' });
+    expect((await call('GET', 'summary')).body).toMatchObject({ settings: { ageGroup: 'primary' } });
+    await call('PUT', 'settings', { ageGroup: 'preschool' });
+  });
+
+  it('câu tự gõ: chấm theo lần gõ đầu, số không hợp lệ bị từ chối; cửa vào Tư duy toán không có bài', async () => {
+    const { complete, questions } = await playQuiz('pm-mental', 2);
+    expect(questions.every((q) => q.input && q.options.length === 0)).toBe(true);
+    expect(complete.status).toBe(200);
+    expect(complete.body).toMatchObject({ correctAnswers: 8, score: 8 });
+
+    const start = await call('POST', 'quiz/sessions', { chapterId: 'pm-compare' });
+    const { sessionId, questions: qs } = start.body as { sessionId: string; questions: Question[] };
+    await ageSession(sessionId);
+    const answers = qs.map((q) => ({ questionId: q.id, attempts: q.input ? [1.5, q.correctAnswer] : [q.correctAnswer] }));
+    // Số thập phân: bị chặn ngay ở bước kiểm tra dữ liệu (400); số quá lớn: bị chặn khi chấm (422).
+    expect((await call('POST', `quiz/sessions/${sessionId}/complete`, { answers })).status).toBe(400);
+    const tooBig = qs.map((q) => ({ questionId: q.id, attempts: q.input ? [1_000_000, q.correctAnswer] : [q.correctAnswer] }));
+    expect((await call('POST', `quiz/sessions/${sessionId}/complete`, { answers: tooBig })).status).toBe(422);
+    expect((await call('POST', 'quiz/sessions', { chapterId: 'pm-think' })).status).toBe(404);
+  });
+
+  it('tiến độ tổng chỉ tính chương của nhóm tuổi đang chọn', async () => {
+    const before = (await call('GET', 'summary')).body as { overallProgress: number };
+    await call('PUT', 'settings', { ageGroup: 'primary' });
+    const primary = (await call('GET', 'summary')).body as { overallProgress: number };
+    // Đã chơi Tính nhẩm cấp 1 ở test trên => nhóm 5–9 tuổi có tiến độ > 0.
+    expect(primary.overallProgress).toBeGreaterThan(0);
+    expect(primary.overallProgress).not.toBe(before.overallProgress);
+    await call('PUT', 'settings', { ageGroup: 'preschool' });
+  });
+});
+
+describe('Nhóm 5–9 tuổi: xu, ôn câu sai, đổi quà, thử thách, xếp hạng (API)', () => {
+  type Overview = { coins: { earned: number; spent: number; balance: number }; reviewCount: number; challengeBest: number; weekRank: number; weekCoins: number };
+  const overview = async () => (await call('GET', 'primary/overview')).body as Overview;
+
+  it('làm bài: đúng lần đầu 2 xu, thử lại 1 xu; câu sai vào danh sách ôn', async () => {
+    // Dọn danh sách ôn (test trước có thể đã để lại câu sai trùng với câu sắp gặp).
+    while ((await overview()).reviewCount > 0) await playQuiz('pm-review');
+    const before = await overview();
+    const { complete } = await playQuiz('pm-mental', 3);
+    expect(complete.body).toMatchObject({ coinsEarned: 7 * 2 + 3 });
+    const after = await overview();
+    expect(after.coins.earned - before.coins.earned).toBe(17);
+    expect(after.reviewCount - before.reviewCount).toBe(3);
+    // 10/10 ở nhóm 5–9 tuổi: chỉ có xu, không kẹo / sticker / thành tích
+    const perfect = await playQuiz('pm-mental');
+    expect(perfect.complete.body).toMatchObject({ isPerfectScore: true, candiesEarned: 0, coinsEarned: 20, rewards: [] });
+    // Nhóm 3–5 tuổi không có xu
+    const { complete: pre } = await playQuiz('number-recognition');
+    expect(pre.body).toMatchObject({ coinsEarned: 0 });
+  });
+
+  it('ôn câu sai: làm đúng ngay thì câu đó được xoá; hết câu => 409', async () => {
+    let { reviewCount } = await overview();
+    expect(reviewCount).toBeGreaterThan(0);
+    while (reviewCount > 0) {
+      const { complete, questions } = await playQuiz('pm-review');
+      expect(complete.status).toBe(200);
+      expect(questions.length).toBe(Math.min(10, reviewCount));
+      expect(questions.every((q) => q.id.includes('|'))).toBe(true);
+      const next = (await overview()).reviewCount;
+      expect(next).toBe(reviewCount - questions.length);
+      reviewCount = next;
+    }
+    const empty = await call('POST', 'quiz/sessions', { chapterId: 'pm-review' });
+    expect(empty.status).toBe(409);
+    expect(empty.body).toMatchObject({ error: { code: 'review_empty' } });
+    // Bài ôn không hiện ở trang chủ / không tính tiến độ
+    expect(CHAPTERS.find((c) => c.id === 'pm-review')?.review).toBe(true);
+  });
+
+  it('đổi quà: phụ huynh đặt quà, bé đổi khi đủ xu, bấm lặp không trừ hai lần', async () => {
+    expect((await call('POST', 'shop/rewards', { name: 'Đi công viên', cost: 5 })).status).toBe(401);
+    expect((await call('POST', 'shop/rewards', { name: '', cost: 5 }, { auth: true })).status).toBe(400);
+    const added = await call('POST', 'shop/rewards', { name: 'Đi công viên', cost: 5 }, { auth: true });
+    expect(added.status).toBe(200);
+    await call('POST', 'shop/rewards', { name: 'Xe đạp mới', cost: 100_000 }, { auth: true });
+    const shop = (await call('GET', 'shop')).body as { rewards: { id: string; name: string; cost: number }[]; coins: { balance: number } };
+    const park = shop.rewards.find((r) => r.name === 'Đi công viên')!;
+    const bike = shop.rewards.find((r) => r.name === 'Xe đạp mới')!;
+    const rid = () => crypto.randomUUID();
+
+    const tooMuch = await call('POST', 'shop/redeem', { rewardId: bike.id, redemptionId: rid() });
+    expect(tooMuch.status).toBe(409);
+    expect(tooMuch.body).toMatchObject({ error: { code: 'not_enough_coins' } });
+
+    const id = rid();
+    const r1 = await call('POST', 'shop/redeem', { rewardId: park.id, redemptionId: id });
+    expect(r1.status).toBe(200);
+    const r2 = await call('POST', 'shop/redeem', { rewardId: park.id, redemptionId: id });
+    expect((r2.body as { coins: { balance: number } }).coins.balance).toBe(shop.coins.balance - 5);
+    const { redemptions } = r2.body as { redemptions: { id: string; deliveredAt: string | null }[] };
+    expect(redemptions.filter((x) => x.id === id)).toHaveLength(1);
+
+    expect((await call('POST', `shop/redemptions/${id}/deliver`)).status).toBe(401);
+    const delivered = await call('POST', `shop/redemptions/${id}/deliver`, {}, { auth: true });
+    expect((delivered.body as { redemptions: { id: string; deliveredAt: string | null }[] }).redemptions.find((x) => x.id === id)?.deliveredAt).toBeTruthy();
+
+    // Bỏ quà: ẩn khỏi danh sách nhưng lịch sử đổi vẫn còn tên
+    const removed = (await call('POST', `shop/rewards/${park.id}/remove`, {}, { auth: true })).body as { rewards: { id: string }[]; redemptions: { name: string }[] };
+    expect(removed.rewards.some((r) => r.id === park.id)).toBe(false);
+    expect(removed.redemptions.some((r) => r.name === 'Đi công viên')).toBe(true);
+    expect((await call('POST', 'shop/redeem', { rewardId: park.id, redemptionId: rid() })).status).toBe(404);
+  });
+
+  it('thử thách 60 giây: server chấm, chặn trả lời quá nhanh / sai thứ tự, kỷ lục và xu', async () => {
+    const before = await overview();
+    const start = await call('POST', 'challenge');
+    expect(start.status).toBe(200);
+    const { runId, questions } = start.body as { runId: string; questions: { id: string; text: string; answer: number }[] };
+    expect(questions.length).toBeGreaterThanOrEqual(60);
+    for (const q of questions.slice(0, 20)) {
+      const m = q.text.match(/^(\d+) ([+−]) (\d+)$/)!;
+      expect(m[2] === '+' ? Number(m[1]) + Number(m[3]) : Number(m[1]) - Number(m[3])).toBe(q.answer);
+    }
+    const answers = questions.slice(0, 20).map((q, i) => ({ questionId: q.id, value: i < 15 ? q.answer : q.answer + 1 }));
+    // Vừa bắt đầu đã nộp 20 câu => quá nhanh
+    expect((await call('POST', `challenge/${runId}/complete`, { answers })).status).toBe(422);
+    await db.update(challengeRuns).set({ startedAt: sql`${challengeRuns.startedAt} - interval '61 seconds'` }).where(eq(challengeRuns.id, runId));
+    const swapped = [answers[1]!, answers[0]!, ...answers.slice(2)];
+    expect((await call('POST', `challenge/${runId}/complete`, { answers: swapped })).status).toBe(422);
+    const done = await call('POST', `challenge/${runId}/complete`, { answers });
+    expect(done.body).toMatchObject({ correct: 15, wrong: 5, coinsEarned: 7, best: Math.max(15, before.challengeBest) });
+    const again = await call('POST', `challenge/${runId}/complete`, { answers });
+    expect(again.body).toMatchObject({ correct: 15, coinsEarned: 0, alreadyCompleted: true });
+    const after = await overview();
+    expect(after.challengeBest).toBe(Math.max(15, before.challengeBest));
+    expect(after.coins.earned - before.coins.earned).toBe(7);
+  });
+
+  it('bảng xếp hạng: gia đình mình có mặt, xếp theo xu tuần này', async () => {
+    const r = await call('GET', 'leaderboard');
+    const body = r.body as { week: { name: string; coins: number; me: boolean; rank: number }[]; allTime: { me: boolean; coins: number }[] };
+    const me = body.week.find((x) => x.me)!;
+    expect(me).toMatchObject({ name: 'Nhà Test', rank: 1 });
+    expect(me.coins).toBe((await overview()).weekCoins);
+    expect(body.allTime.find((x) => x.me)!.coins).toBeGreaterThanOrEqual(me.coins);
+  });
+
+  it('sao lưu phiên bản 2 giữ xu, quà, lượt đổi quà, kỷ lục; file phiên bản 1 vẫn nhập được', async () => {
+    const before = await overview();
+    const exported = (await call('GET', 'backup/export', undefined, { auth: true })).body as {
+      schemaVersion: number;
+      data: Record<string, unknown[]> & { coins: unknown[]; redemptions: unknown[]; shopRewards: unknown[] };
+    };
+    expect(exported.data.coins.length).toBeGreaterThan(0);
+    expect(exported.data.redemptions.length).toBeGreaterThan(0);
+    const imported = await call('POST', 'backup/import', { confirm: true, backup: exported }, { auth: true });
+    expect(imported.status).toBe(200);
+    const after = await overview();
+    expect(after.coins).toEqual(before.coins);
+    expect(after.challengeBest).toBe(before.challengeBest);
+
+    // Gian lận: đổi quà nhiều hơn số xu kiếm được
+    const cheat = structuredClone(exported);
+    cheat.data.coins = [];
+    expect((await call('POST', 'backup/import', { confirm: true, backup: cheat }, { auth: true })).status).toBe(422);
+
+    // File cũ (phiên bản 1) chưa có các mục mới
+    const v1 = structuredClone(exported) as { schemaVersion: number; data: Record<string, unknown> };
+    v1.schemaVersion = 1;
+    for (const k of ['coins', 'shopRewards', 'redemptions', 'challenges']) delete v1.data[k];
+    expect((await call('POST', 'backup/import', { confirm: true, backup: v1 }, { auth: true })).status).toBe(200);
+    expect((await overview()).coins).toEqual({ earned: 0, spent: 0, balance: 0 });
   });
 });

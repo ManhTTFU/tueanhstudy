@@ -126,6 +126,16 @@ Nguyên tắc chính:
 - **Cộng trừ** có 2 cấp: **Phạm vi 5** rồi **Phạm vi 10** (mở khoá như trên). Mỗi cấp 2 trò **Phép cộng** (hai nhóm hình gộp lại) và **Phép trừ** (một nhóm hình, vài hình bị gạch bỏ). Phép tính hiện dạng "2 + 3 = ?", giọng đọc "Hai cộng ba bằng mấy?". Mỗi bài 10 phép tính khác nhau, mỗi câu một loại hình ngẫu nhiên.
 - **Sân chơi trí tuệ**: thẻ trên trang chủ, bấm vào để chọn 1 trong 11 chủ đề của Sân chơi tư duy (bên dưới). 5 trò kỹ năng cũ (Quan sát, Chú ý, Tư duy, Ghi nhớ, Tưởng tượng) đã gộp vào các chủ đề nên được tắt; lịch sử cũ vẫn hiện trong khu phụ huynh.
 - **Sân chơi tư duy** (nằm trong thẻ **Sân chơi trí tuệ**): 11 chủ đề – Màu sắc, Hình khối, Đếm số, Toán vui, So sánh, Phân loại, Quan sát, Quy luật (bảng 3×3, sudoku hình 4×4), Mê cung & phương hướng, Chữ cái, Thời gian (trước – sau, buổi, thứ, đồng hồ). Mỗi chủ đề 4–6 cấp, cấp sau mở khi đạt 8/10 cấp trước; sticker riêng khi đạt 10/10 cấp cuối. Một câu có thể có 2–4 phương án.
+- **Hai nhóm tuổi**: trang chủ có công tắc **Bé 3–5 tuổi** (mầm non: các chương ở trên) / **Bé 5–9 tuổi** (tiểu học, lớp 1–3). Lựa chọn lưu trong cài đặt của gia đình (`families.age_group`); thanh "Tiến độ" chỉ tính các chương của nhóm đang chọn.
+- **Nhóm 5–9 tuổi** – bé **tự gõ đáp án bằng bàn phím số** (một số câu chọn đáp án). Trả lời sai lần đầu ⇒ hiện bảng **"Cùng nghĩ từng bước"**: bé giải các bước nhỏ (chạm chọn số) rồi nhập lại đáp án; nút **Mẹo** gợi ý cách làm. Đề đọc bằng giọng tiếng Việt của máy (đề sinh ngẫu nhiên nên không có file ghi âm).
+  - **Tính nhẩm**: 6 cấp nối tiếp – Cộng qua 10, Trừ qua 10, Tìm số còn thiếu, Nhẩm 2 chữ số, Số tròn chục/tròn trăm, Nhẩm 3 chữ số (10 câu/bài).
+  - **Tư duy toán**: 7 chủ đề bài toán có lời văn – Hơn kém, Tính ngược, Hình bí ẩn, Quy luật, Thời gian, Suy luận, Chữ số. Mỗi chủ đề 3 cấp (Khởi động → Nâng cao → Thử thách), 8 câu/bài; mở cấp khi đạt 8 điểm (điểm quy về thang 10 và làm tròn, nên đúng 6/8 câu là đủ) ở cấp trước.
+- **Xu 🪙 (nhóm 5–9 tuổi)** – nhóm này **không có kẹo, hộp quà, sticker** (trang chủ ẩn khu Phần thưởng & Bộ sưu tập; thanh trên cùng hiện xu thay kẹo); mỗi câu đúng ngay lần đầu +2 xu, đúng sau khi thử lại +1 xu; Thử thách 60 giây: cứ 2 câu đúng +1 xu. Xu ghi trong `coin_ledger` (chống cộng trùng), xu còn lại = xu kiếm được − xu đã đổi quà.
+- **Luyện thêm (nhóm 5–9 tuổi)**, trên trang chủ:
+  - **Thử thách 60 giây**: nhẩm cộng, trừ qua 10 thật nhanh; server sinh đề và tự chấm (chặn trả lời nhanh hơn 0,6 giây/câu, sai thứ tự); lưu kỷ lục.
+  - **Ôn câu sai**: câu sai ở lần trả lời đầu được lưu lại (tối đa 40 câu mới nhất); bài ôn lấy tối đa 10 câu, làm đúng ngay lần đầu thì câu đó được xoá khỏi danh sách.
+  - **Đổi quà**: bố mẹ đặt quà thật và giá xu trong **Góc phụ huynh → Đổi quà**; bé tự đổi khi đủ xu; bố mẹ bấm "Đã trao quà" khi trao.
+  - **Bảng xếp hạng**: các gia đình xếp theo xu kiếm được trong tuần (từ thứ Hai, giờ Việt Nam) và từ trước tới nay; chỉ hiện tên gia đình. Đổi quà không làm giảm điểm xếp hạng.
 - Chương 2: hình xếp lưới tự đổi bố cục theo số lượng (vd. 7 = 4+3), xuất hiện lần lượt; bé **chạm từng hình để đếm** (hình được đánh số và đọc to).
 
 ## 4. Cài đặt & chạy local
@@ -257,7 +267,13 @@ Tất cả nằm dưới `/api/`. Mọi API (trừ các API ghi "mở") cần m�
 | POST | `learning/complete` | – | `{chapterId}` ⇒ ghi nhận đã học hết thẻ |
 | GET | `rewards` | – | Kẹo, sticker, số hộp quà mở được |
 | POST | `rewards/gifts/open` | – | `{giftId: uuid}` ⇒ mở hộp quà (idempotent theo `giftId`) |
-| GET / PUT | `settings` | – | Âm thanh, giảm chuyển động |
+| GET / PUT | `settings` | – | Âm thanh, giảm chuyển động, nhóm tuổi (`ageGroup`) |
+| GET | `primary/overview` | – | Xu, số câu cần ôn, kỷ lục thử thách, hạng tuần (nhóm 5–9 tuổi) |
+| GET | `leaderboard` | – | Bảng xếp hạng xu theo tuần / từ trước tới nay |
+| POST | `challenge` · `challenge/:id/complete` | – | Bắt đầu / nộp Thử thách 60 giây `{answers:[{questionId,value}]}` |
+| GET | `shop` | – | Xu, danh sách quà, các lần đổi quà |
+| POST | `shop/redeem` | – | `{rewardId, redemptionId}` (UUID do client sinh) |
+| POST | `shop/rewards` · `shop/rewards/:id/remove` · `shop/redemptions/:id/deliver` | Phụ huynh | Thêm / bỏ quà, đánh dấu đã trao |
 | GET | `family/status` | mở | Máy đã đăng nhập gia đình chưa, có tạo thêm gia đình được không |
 | POST | `family/login` | mở | `{name, code}` hoặc `{name, pin}` ⇒ đăng nhập gia đình (máy được nhớ 1 năm; dùng PIN thì vào luôn khu phụ huynh) |
 | POST | `family/register` | mở | `{name, code, pin, invite?}` ⇒ tạo gia đình mới (cần mã mời từ gia đình thứ 2) |
@@ -326,6 +342,8 @@ Khi thay đổi định dạng: tăng `BACKUP_SCHEMA_VERSION` và thêm bước 
 - *Thêm phép nhân / chia*: thêm một mục vào `OPERATIONS` (`operations.ts`: ký hiệu, cách đọc, `compute`, `pairs`, `answerRange`), thêm trò vào `ARITHMETIC_GAMES`, thêm cách vẽ vào `OPERATION_VIEWS` (`components/ArithmeticViews.tsx`, vd. nhân = b nhóm × a hình). Bộ sinh câu hỏi, chấm điểm, khoá cấp, phần thưởng, API không cần sửa.
 
 **Thêm dạng bài "Sân chơi tư duy"** (`src/chapters/dada/`): câu hỏi được mô tả bằng các khối hình (`Block`: hàng, lưới, hai tranh, hiện-rồi-úp, chữ, mê cung) và hình (`Visual`: emoji, bóng bay, màu, hình khối, chữ, nhóm, đồng hồ) trong `kit.ts`; `components/DadaViews.tsx` vẽ tất cả. Thêm dạng bài = viết 1 hàm sinh câu hỏi (dùng `choiceQ` / `numberQ`) trong `topics/<chủ đề>.ts` và thêm 1 dòng vào `levels`. Thêm chủ đề = 1 file `Topic` mới + thêm vào `TOPICS` trong `config.ts`. Giọng đọc: `npm run assets:voice` tự lấy mẫu mọi câu hỏi (file `sounds/dada/<mã băm>.m4a`); câu nào thiếu file sẽ đọc bằng giọng của máy.
+
+**Thêm dạng bài nhóm 5–9 tuổi** (`src/chapters/primary/`): viết 1 hàm `Gen` (`(rng, L) => câu hỏi`, L = mức 1–3) bằng `inputQ` (bé tự gõ) hoặc `pickQ` (chọn chữ/hình) trong `kit.ts`, kèm `steps` (các bước gợi ý – bước cuối nên ra đúng đáp án) và `tip`; rồi thêm `[hàm, cấp tối thiểu]` vào `gens` của chủ đề trong `topics.ts` (hoặc một cấp mới vào `MENTAL_STAGES` trong `mental.ts`). `components/PrimaryViews.tsx` tự vẽ đề, phép tính, dãy, tháp số. `tests/primary.test.ts` sinh hàng nghìn câu để kiểm tra.
 
 **Thêm cấp số mới (ví dụ 101–110):** tăng `MAX_NUMBER` trong `src/data/numbers/numbers.ts` (và bổ sung cách đọc trong `numberWord`), thêm 1 cặp sticker vào `LEVEL_STICKERS` trong `src/chapters/number-recognition/levels.ts` (khai báo trong `src/data/stickers.ts`), rồi chạy `npm run assets:images` và `npm run assets:voice`. Thẻ số, trang chương, khoá cấp, giao diện và API tự nhận cấp mới.
 

@@ -14,8 +14,10 @@ function starsFor(score: number) {
 }
 
 /** Màn hình nhận thưởng khi đạt 10/10 (toàn màn hình). */
-export function RewardCelebration({ result, onContinue }: { result: QuizResultView; onContinue: () => void }) {
+/** `coinsOnly`: nhóm 5–9 tuổi – thưởng bằng xu, không có kẹo / hộp quà / sticker. */
+export function RewardCelebration({ result, onContinue, coinsOnly = false }: { result: QuizResultView; onContinue: () => void; coinsOnly?: boolean }) {
   const stickers = result.rewards.filter((r) => r.rewardType === 'sticker');
+  const coins = result.coinsEarned ?? 0;
   return (
     <motion.div
       className="fixed inset-0 z-40 flex flex-col items-center justify-center overflow-y-auto bg-gradient-to-b from-sunny-300 via-bubblegum-300 to-grape-300 p-4 text-center"
@@ -40,16 +42,24 @@ export function RewardCelebration({ result, onContinue }: { result: QuizResultVi
           animate={{ y: 0, rotate: [0, -10, 10, 0] }}
           transition={{ type: 'spring', stiffness: 120, damping: 9, delay: 0.3 }}
         >
-          <img src="/assets/rewards/candy.svg" alt="Viên kẹo" className="h-36 w-36 drop-shadow-xl sm:h-44 sm:w-44" />
-          {result.candiesEarned > 0 && (
+          {coinsOnly ? (
+            <span className="block text-[8rem] leading-none drop-shadow-xl" aria-label="Xu">
+              🪙
+            </span>
+          ) : (
+            <img src="/assets/rewards/candy.svg" alt="Viên kẹo" className="h-36 w-36 drop-shadow-xl sm:h-44 sm:w-44" />
+          )}
+          {(coinsOnly ? coins : result.candiesEarned) > 0 && (
             <span className="absolute -right-2 top-0 rounded-full bg-white px-4 py-1 text-3xl font-extrabold text-bubblegum-500 shadow-pop-sm">
-              +{result.candiesEarned}
+              +{coinsOnly ? coins : result.candiesEarned}
             </span>
           )}
         </motion.div>
       </div>
 
-      {result.candiesEarned > 0 ? (
+      {coinsOnly && coins > 0 ? (
+        <p className="text-2xl font-bold text-white sm:text-3xl">Con nhận được {coins} xu!</p>
+      ) : result.candiesEarned > 0 ? (
         <p className="text-2xl font-bold text-white sm:text-3xl">Bé nhận được {result.candiesEarned} viên kẹo!</p>
       ) : !result.saved ? (
         <p className="rounded-2xl bg-white/70 px-4 py-2 text-lg font-bold text-ink/70">Chưa lưu được phần thưởng – nhờ bố mẹ kiểm tra kết nối nhé.</p>
@@ -92,10 +102,13 @@ export function ResultScreen({
   result,
   onReplay,
   onRetrySave,
+  coinsOnly = false,
 }: {
   result: QuizResultView;
   onReplay: () => void;
   onRetrySave: () => void;
+  /** Nhóm 5–9 tuổi: không có hộp quà (thưởng bằng xu). */
+  coinsOnly?: boolean;
 }) {
   const navigate = useNavigate();
   const stickers = result.rewards.filter((r) => r.rewardType === 'sticker');
@@ -122,6 +135,12 @@ export function ResultScreen({
         <Stat icon={<Clock className="text-peach-500" />} label="Hoàn thành" value={formatDateTime(result.completedAt)} small />
       </div>
 
+      {(result.coinsEarned ?? 0) > 0 && (
+        <p className="rounded-3xl bg-sunny-100 px-4 py-2 text-xl font-extrabold" data-testid="result-coins">
+          🪙 +{result.coinsEarned} xu
+        </p>
+      )}
+
       {(result.candiesEarned > 0 || stickers.length > 0) && (
         <div className="flex flex-wrap items-center justify-center gap-3 rounded-3xl bg-sunny-100 px-4 py-3">
           {result.candiesEarned > 0 && (
@@ -137,7 +156,7 @@ export function ResultScreen({
         </div>
       )}
 
-      {(result.giftsAvailable ?? 0) > 0 && (
+      {!coinsOnly && (result.giftsAvailable ?? 0) > 0 && (
         <button type="button" className="kid-btn bg-grape-400 text-white" onClick={() => navigate('/bo-suu-tap')}>
           <Gift size={30} /> Mở hộp quà!
         </button>

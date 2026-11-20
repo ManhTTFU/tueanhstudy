@@ -6,7 +6,9 @@ import { motion } from 'framer-motion';
 import { Award, BookCheck, ChevronRight, Gift, Play, Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useSettings } from '../../app/SettingsContext';
 import { getHomeChapters } from '../../chapters/registry';
+import type { AgeGroup } from '../../engine/types';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { AppHeader } from '../../components/AppHeader';
 import { PageShell, ProgressBar, Stars } from '../../components/ui';
@@ -14,15 +16,23 @@ import { getSticker, stickerImage, STICKERS } from '../../data/stickers';
 import { useApiData } from '../../hooks/useApiData';
 import { api, type Summary } from '../../services/api';
 import { AudioController } from '../audio/AudioController';
+import { PrimaryExtras } from '../primary/PrimaryExtras';
 
 export function HomePage() {
-  const { data: summary, error } = useApiData(api.summary);
-  const chapters = getHomeChapters();
+  const { data: summary, error, reload } = useApiData(api.summary);
+  // Xu, kỷ lục, câu cần ôn, hạng tuần – chỉ dùng cho nhóm 5–9 tuổi.
+  const { data: overview, reload: reloadOverview } = useApiData(api.primaryOverview);
+  const { ageGroup, setAgeGroup } = useSettings();
+  const chapters = getHomeChapters(ageGroup);
   const navigate = useNavigate();
 
   return (
     <PageShell>
-      <AppHeader progress={summary?.overallProgress ?? 0} candies={summary?.totals.totalCandies ?? 0} />
+      <AppHeader
+        progress={summary?.overallProgress ?? 0}
+        candies={summary?.totals.totalCandies ?? 0}
+        coins={ageGroup === 'primary' ? (overview?.coins.balance ?? 0) : undefined}
+      />
 
       {error && (
         <p className="mt-3 rounded-2xl bg-white/70 px-4 py-2 text-center text-sm text-ink/60">
@@ -30,7 +40,16 @@ export function HomePage() {
         </p>
       )}
 
-      <section className="mt-6" aria-label="Chọn chương học">
+      <AgeSwitch
+        value={ageGroup}
+        onChange={(v) => {
+          AudioController.sfx('tap');
+          // Tiến độ tổng chỉ tính các chương của nhóm tuổi đang chọn => tải lại sau khi lưu.
+          void setAgeGroup(v).then(() => Promise.all([reload(), reloadOverview()]));
+        }}
+      />
+
+      <section className="mt-4" aria-label="Chọn chương học">
         <div className="grid gap-5 md:grid-cols-2">
           {chapters.map((chapter, i) => {
             const ui = getChapterUI(chapter.id);
@@ -85,8 +104,46 @@ export function HomePage() {
         </div>
       </section>
 
-      <RewardZone summary={summary} />
+      {ageGroup === 'primary' && <PrimaryExtras data={overview} />}
+
+      {/* Kẹo, hộp quà, sticker chỉ dành cho bé 3–5 tuổi; nhóm 5–9 tuổi dùng xu & Đổi quà. */}
+      {ageGroup === 'preschool' && <RewardZone summary={summary} />}
     </PageShell>
+  );
+}
+
+const AGE_TABS: { id: AgeGroup; emoji: string; label: string; sub: string }[] = [
+  { id: 'preschool', emoji: '🧸', label: 'Bé 3–5 tuổi', sub: 'Mầm non' },
+  { id: 'primary', emoji: '🎒', label: 'Bé 5–9 tuổi', sub: 'Tiểu học' },
+];
+
+/** Chọn nhóm tuổi: mỗi nhóm có các chương riêng (lưu trong cài đặt gia đình). */
+function AgeSwitch({ value, onChange }: { value: AgeGroup; onChange: (v: AgeGroup) => void }) {
+  return (
+    <div className="mt-5 grid grid-cols-2 gap-2 rounded-4xl bg-white/70 p-2 shadow-pop-sm" role="tablist" aria-label="Chọn nhóm tuổi">
+      {AGE_TABS.map((t) => {
+        const on = t.id === value;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            data-testid={`age-${t.id}`}
+            onClick={() => !on && onChange(t.id)}
+            className={`flex min-h-[64px] items-center justify-center gap-2 rounded-3xl px-3 py-2 transition-colors ${on ? 'bg-grape-500 text-white shadow-pop-sm' : 'text-ink/70'}`}
+          >
+            <span className="text-3xl" aria-hidden>
+              {t.emoji}
+            </span>
+            <span className="flex flex-col items-start leading-tight">
+              <span className="text-xl font-extrabold sm:text-2xl">{t.label}</span>
+              <span className={`text-sm font-bold ${on ? 'text-white/80' : 'text-ink/50'}`}>{t.sub}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

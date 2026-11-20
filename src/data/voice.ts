@@ -13,7 +13,7 @@ import { MAX_NUMBER, NUMBER_CARDS, findNumberPrompt, numberWord } from './number
 import { PRAISES, PERFECT_MESSAGE, TRY_AGAIN_MESSAGE } from '../engine/messages.js';
 
 export interface VoiceLine {
-  /** Đường dẫn tương đối trong public/assets/sounds (không có đuôi). */
+  /** Đường dẫn tương đối trong public/assets/sounds (không có đuôi). Rỗng = dùng giọng đọc hệ thống. */
   file: string;
   text: string;
 }

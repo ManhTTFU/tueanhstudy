@@ -11,20 +11,27 @@ import { randomUUID } from 'node:crypto';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  challengeRuns,
   chapterProgress,
+  coinLedger,
   families,
   giftOpenings,
   progress,
   quizAnswers,
   quizSessions,
+  redemptions,
+  reviewItems,
   rewards,
+  shopRewards,
 } from '../../db/schema.js';
+import { MAX_INPUT_ATTEMPTS } from '../../src/engine/QuizEngine.js';
 import type { Database } from '../db.js';
 import { unprocessable } from '../errors.js';
-import { getFamilyRow } from './settingsService.js';
+import { getFamilyRow, toPublicSettings } from './settingsService.js';
 
 export const BACKUP_FORMAT = 'be-vui-hoc-toan-backup';
-export const BACKUP_SCHEMA_VERSION = 1;
+/** 2: thêm xu, quà thật, lượt đổi quà, Thử thách 60 giây (nhóm 5–9 tuổi) và câu tự gõ. */
+export const BACKUP_SCHEMA_VERSION = 2;
 
 const isoDate = z.iso.datetime({ offset: true });
 const nullableIsoDate = isoDate.nullable();
@@ -37,7 +44,9 @@ const questionSchema = z.object({
   prompt: z.string().max(500),
   payload: z.record(z.string(), z.unknown()),
   correctAnswer: int,
-  options: z.array(int).min(1).max(10),
+  // Câu tự gõ (nhóm 5–9 tuổi) không có phương án.
+  options: z.array(int).max(10),
+  input: z.boolean().optional(),
 });
 
 const answerSchema = z.object({
@@ -46,9 +55,9 @@ const answerSchema = z.object({
   questionType: z.string().min(1).max(64),
   correctAnswer: int,
   selectedAnswer: int,
-  attemptHistory: z.array(int).min(1).max(10),
+  attemptHistory: z.array(int).min(1).max(MAX_INPUT_ATTEMPTS),
   isCorrect: z.boolean(),
-  attempts: int.min(1).max(10),
+  attempts: int.min(1).max(MAX_INPUT_ATTEMPTS),
 });
 
 const sessionSchema = z.object({
@@ -79,6 +88,23 @@ const rewardSchema = z.object({
 
 const giftSchema = z.object({ id: z.uuid(), stickerCode: z.string().min(1).max(64), openedAt: isoDate });
 
+const coinSchema = z.object({
+  amount: int.min(1).max(100_000),
+  reason: z.enum(['session', 'challenge']),
+  dedupeKey: z.string().min(1).max(200),
+  earnedAt: isoDate,
+});
+const shopRewardSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), cost: int.min(1).max(100_000), active: z.boolean(), createdAt: isoDate });
+const redemptionSchema = z.object({
+  id: z.uuid(),
+  rewardId: z.uuid().nullable(),
+  name: z.string().min(1).max(60),
+  cost: int.min(1).max(100_000),
+  redeemedAt: isoDate,
+  deliveredAt: nullableIsoDate,
+});
+const challengeSchema = z.object({ id: z.uuid(), startedAt: isoDate, completedAt: isoDate, correct: nonNeg, wrong: nonNeg });
+
 const chapterProgressSchema = z.object({
   chapterId: z.string().min(1).max(64),
   totalSessions: nonNeg,
@@ -107,7 +133,12 @@ export const backupSchema = z.object({
     sessions: z.array(sessionSchema).max(20_000),
     rewards: z.array(rewardSchema).max(100_000),
     giftOpenings: z.array(giftSchema).max(10_000),
-    settings: z.object({ soundEnabled: z.boolean(), reducedMotion: z.boolean() }),
+    coins: z.array(coinSchema).max(100_000),
+    shopRewards: z.array(shopRewardSchema).max(500),
+    redemptions: z.array(redemptionSchema).max(10_000),
+    challenges: z.array(challengeSchema).max(20_000),
+    // ageGroup: thêm sau (tuỳ chọn) – file sao lưu cũ không có vẫn nhập được.
+    settings: z.object({ soundEnabled: z.boolean(), reducedMotion: z.boolean(), ageGroup: z.enum(['preschool', 'primary']).optional() }),
   }),
 });
 
@@ -123,7 +154,15 @@ export function upgradeBackup(raw: unknown): unknown {
   if (typeof version === 'number' && version > BACKUP_SCHEMA_VERSION) {
     throw unprocessable(`File được tạo bởi phiên bản mới hơn (schemaVersion ${version}). Hãy cập nhật ứng dụng.`);
   }
-  // Hiện tại chỉ có phiên bản 1.
+  // 1 -> 2: chưa có xu / quà thật / thử thách.
+  if (version === 1) {
+    const r = raw as { data?: Record<string, unknown> };
+    return {
+      ...r,
+      schemaVersion: 2,
+      data: { coins: [], shopRewards: [], redemptions: [], challenges: [], ...(r.data ?? {}) },
+    };
+  }
   return raw;
 }
 
@@ -177,6 +216,15 @@ export function validateBackup(raw: unknown): BackupFile {
   if (backup.data.giftOpenings.length !== backup.data.progress.giftsOpened) {
     throw unprocessable('Số hộp quà đã mở không khớp');
   }
+  const coinKeys = new Set(backup.data.coins.map((c) => c.dedupeKey));
+  if (coinKeys.size !== backup.data.coins.length) throw unprocessable('Xu bị trùng');
+  const shopIds = new Set(backup.data.shopRewards.map((r) => r.id));
+  if (shopIds.size !== backup.data.shopRewards.length) throw unprocessable('Món quà bị trùng');
+  if (new Set(backup.data.redemptions.map((r) => r.id)).size !== backup.data.redemptions.length) throw unprocessable('Lượt đổi quà bị trùng');
+  if (backup.data.redemptions.some((r) => r.rewardId && !shopIds.has(r.rewardId))) throw unprocessable('Lượt đổi quà tham chiếu tới món quà không tồn tại');
+  const earned = backup.data.coins.reduce((s, c) => s + c.amount, 0);
+  const spent = backup.data.redemptions.reduce((s, r) => s + r.cost, 0);
+  if (spent > earned) throw unprocessable('Số xu đã đổi quà nhiều hơn số xu kiếm được');
   return backup;
 }
 
@@ -209,6 +257,10 @@ export async function exportBackup(db: Database, familyId: string, now = new Dat
     .where(eq(giftOpenings.familyId, familyId))
     .orderBy(asc(giftOpenings.openedAt));
   const settings = await getFamilyRow(db, familyId);
+  const coinRows = await db.select().from(coinLedger).where(eq(coinLedger.familyId, familyId)).orderBy(asc(coinLedger.id));
+  const shopRows = await db.select().from(shopRewards).where(eq(shopRewards.familyId, familyId)).orderBy(asc(shopRewards.createdAt));
+  const redemptionRows = await db.select().from(redemptions).where(eq(redemptions.familyId, familyId)).orderBy(asc(redemptions.redeemedAt));
+  const challengeRows = await db.select().from(challengeRuns).where(eq(challengeRuns.familyId, familyId)).orderBy(asc(challengeRuns.startedAt));
 
   const answersBySession = new Map<string, typeof answers>();
   for (const a of answers) {
@@ -276,7 +328,25 @@ export async function exportBackup(db: Database, familyId: string, now = new Dat
         dedupeKey: r.dedupeKey,
       })),
       giftOpenings: gifts.map((g) => ({ id: g.id, stickerCode: g.stickerCode, openedAt: g.openedAt.toISOString() })),
-      settings: { soundEnabled: settings.soundEnabled, reducedMotion: settings.reducedMotion },
+      coins: coinRows.map((c) => ({
+        amount: c.amount,
+        reason: c.reason as 'session' | 'challenge',
+        dedupeKey: c.dedupeKey,
+        earnedAt: c.earnedAt.toISOString(),
+      })),
+      shopRewards: shopRows.map((r) => ({ id: r.id, name: r.name, cost: r.cost, active: r.active, createdAt: r.createdAt.toISOString() })),
+      redemptions: redemptionRows.map((r) => ({
+        id: r.id,
+        rewardId: r.rewardId,
+        name: r.name,
+        cost: r.cost,
+        redeemedAt: r.redeemedAt.toISOString(),
+        deliveredAt: iso(r.deliveredAt),
+      })),
+      challenges: challengeRows
+        .filter((c) => c.completedAt)
+        .map((c) => ({ id: c.id, startedAt: c.startedAt.toISOString(), completedAt: c.completedAt!.toISOString(), correct: c.correct, wrong: c.wrong })),
+      settings: { soundEnabled: settings.soundEnabled, reducedMotion: settings.reducedMotion, ageGroup: toPublicSettings(settings).ageGroup },
     },
   };
 }
@@ -284,6 +354,11 @@ export async function exportBackup(db: Database, familyId: string, now = new Dat
 /** Xoá toàn bộ dữ liệu học tập CỦA GIA ĐÌNH (giữ nguyên tên, mã, PIN & cài đặt). */
 async function clearLearningData(tx: Database, familyId: string): Promise<void> {
   // quiz_answers tự xoá theo quiz_sessions (ON DELETE CASCADE).
+  // Danh sách quà (shop_rewards) là cài đặt của phụ huynh nên được giữ lại khi xoá dữ liệu học tập.
+  await tx.delete(coinLedger).where(eq(coinLedger.familyId, familyId));
+  await tx.delete(redemptions).where(eq(redemptions.familyId, familyId));
+  await tx.delete(reviewItems).where(eq(reviewItems.familyId, familyId));
+  await tx.delete(challengeRuns).where(eq(challengeRuns.familyId, familyId));
   await tx.delete(rewards).where(eq(rewards.familyId, familyId));
   await tx.delete(giftOpenings).where(eq(giftOpenings.familyId, familyId));
   await tx.delete(quizSessions).where(eq(quizSessions.familyId, familyId));
@@ -310,9 +385,12 @@ export async function importBackup(db: Database, familyId: string, raw: unknown)
   // Cấp mã mới cho phiên học & hộp quà: mã cũ có thể đang được gia đình khác dùng.
   const sessionIdMap = new Map(data.sessions.map((x) => [x.id, randomUUID()]));
   const giftIdMap = new Map(data.giftOpenings.map((g) => [g.id, randomUUID()]));
+  const shopIdMap = new Map(data.shopRewards.map((r) => [r.id, randomUUID()]));
+  const challengeIdMap = new Map(data.challenges.map((c) => [c.id, randomUUID()]));
   const remapKey = (key: string) =>
     key.replace(/^(session:)([0-9a-f-]{36})/i, (m, p1: string, id: string) => (sessionIdMap.has(id) ? p1 + sessionIdMap.get(id) : m))
-      .replace(/^(gift:)([0-9a-f-]{36})/i, (m, p1: string, id: string) => (giftIdMap.has(id) ? p1 + giftIdMap.get(id) : m));
+      .replace(/^(gift:)([0-9a-f-]{36})/i, (m, p1: string, id: string) => (giftIdMap.has(id) ? p1 + giftIdMap.get(id) : m))
+      .replace(/^(challenge:)([0-9a-f-]{36})/i, (m, p1: string, id: string) => (challengeIdMap.has(id) ? p1 + challengeIdMap.get(id) : m));
   await db.transaction(async (tx) => {
     await getFamilyRow(tx, familyId, true);
     await clearLearningData(tx, familyId);
@@ -367,9 +445,47 @@ export async function importBackup(db: Database, familyId: string, raw: unknown)
         })),
       ),
     );
+    // Nhóm 5–9 tuổi: quà thật (thay toàn bộ), lượt đổi quà, xu, thử thách – cấp mã mới.
+    await tx.delete(shopRewards).where(eq(shopRewards.familyId, familyId));
+    await insertChunked(data.shopRewards, (chunk) =>
+      tx.insert(shopRewards).values(chunk.map((r) => ({ ...r, id: shopIdMap.get(r.id)!, familyId, createdAt: new Date(r.createdAt) }))),
+    );
+    await insertChunked(data.redemptions, (chunk) =>
+      tx.insert(redemptions).values(
+        chunk.map((r) => ({
+          ...r,
+          id: randomUUID(),
+          familyId,
+          rewardId: r.rewardId ? shopIdMap.get(r.rewardId)! : null,
+          redeemedAt: new Date(r.redeemedAt),
+          deliveredAt: r.deliveredAt ? new Date(r.deliveredAt) : null,
+        })),
+      ),
+    );
+    await insertChunked(data.challenges, (chunk) =>
+      tx.insert(challengeRuns).values(
+        chunk.map((c) => ({
+          id: challengeIdMap.get(c.id)!,
+          familyId,
+          questions: [],
+          startedAt: new Date(c.startedAt),
+          completedAt: new Date(c.completedAt),
+          correct: c.correct,
+          wrong: c.wrong,
+        })),
+      ),
+    );
+    await insertChunked(data.coins, (chunk) =>
+      tx.insert(coinLedger).values(chunk.map((c) => ({ ...c, familyId, dedupeKey: remapKey(c.dedupeKey), earnedAt: new Date(c.earnedAt) }))),
+    );
     await tx
       .update(families)
-      .set({ soundEnabled: data.settings.soundEnabled, reducedMotion: data.settings.reducedMotion, updatedAt: new Date() })
+      .set({
+        soundEnabled: data.settings.soundEnabled,
+        reducedMotion: data.settings.reducedMotion,
+        ...(data.settings.ageGroup ? { ageGroup: data.settings.ageGroup } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(families.id, familyId));
   });
   return { sessions: data.sessions.length, rewards: data.rewards.length };

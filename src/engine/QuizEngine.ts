@@ -30,6 +30,13 @@ export function validateQuestionSet(
   if (questions.length !== expectedCount) return `cần ${expectedCount} câu, có ${questions.length}`;
   if (new Set(questions.map((q) => q.id)).size !== questions.length) return 'có câu hỏi trùng nhau';
   for (const q of questions) {
+    if (q.input) {
+      // Câu tự gõ: không có phương án, đáp án là số nguyên không âm.
+      if (q.options.length !== 0 || !Number.isInteger(q.correctAnswer) || q.correctAnswer < 0 || q.correctAnswer > MAX_INPUT_VALUE) {
+        return `câu ${q.id} (tự gõ) không hợp lệ`;
+      }
+      continue;
+    }
     // Số phương án: 2..optionCount (vd. "con nào to hơn?" chỉ có 2 lựa chọn).
     const n = q.options.length;
     if (n < 2 || n > optionCount || !areOptionsValid(q.options, q.correctAnswer, n)) {
@@ -37,6 +44,16 @@ export function validateQuestionSet(
     }
   }
   return null;
+}
+
+/** Câu tự gõ: số lần thử tối đa và giá trị lớn nhất bàn phím cho nhập. */
+export const MAX_INPUT_ATTEMPTS = 30;
+export const MAX_INPUT_VALUE = 99_999;
+
+/** Bé được nhập giá trị này cho câu hỏi không (phương án, hoặc số hợp lệ với câu tự gõ). */
+export function isAllowedAnswer(q: Pick<Question<unknown>, 'options' | 'input'>, value: AnswerValue): boolean {
+  if (q.input) return Number.isInteger(value) && value >= 0 && value <= MAX_INPUT_VALUE;
+  return q.options.includes(value);
 }
 
 export interface SubmittedAnswer {
@@ -62,13 +79,14 @@ export type EvaluationResult =
 /**
  * Đánh giá bài nộp dựa trên bộ câu hỏi GỐC (do server lưu).
  * Quy tắc hợp lệ cho mỗi câu:
- *  - có ít nhất 1 lần chọn, các lần chọn không trùng, đều thuộc phương án,
+ *  - có ít nhất 1 lần chọn, các lần chọn không trùng, đều thuộc phương án
+ *    (câu tự gõ: là số nguyên hợp lệ, tối đa MAX_INPUT_ATTEMPTS lần),
  *  - lần chọn cuối là đáp án đúng (bé phải chọn đúng mới qua câu),
  *  - đáp án đúng chỉ xuất hiện ở lần chọn cuối.
  * Điểm được tính theo LẦN CHỌN ĐẦU TIÊN.
  */
 export function evaluateSubmission(
-  questions: readonly Pick<Question<unknown>, 'id' | 'type' | 'correctAnswer' | 'options'>[],
+  questions: readonly Pick<Question<unknown>, 'id' | 'type' | 'correctAnswer' | 'options' | 'input'>[],
   submitted: readonly SubmittedAnswer[],
 ): EvaluationResult {
   if (submitted.length !== questions.length) {
@@ -81,9 +99,9 @@ export function evaluateSubmission(
     if (s.questionId !== q.id) return { ok: false, error: `Câu ${i + 1} không khớp câu hỏi` };
     const attempts = s.attempts;
     if (attempts.length === 0) return { ok: false, error: `Câu ${i + 1} chưa được trả lời` };
-    if (attempts.length > q.options.length) return { ok: false, error: `Câu ${i + 1} có quá nhiều lần chọn` };
+    if (attempts.length > (q.input ? MAX_INPUT_ATTEMPTS : q.options.length)) return { ok: false, error: `Câu ${i + 1} có quá nhiều lần chọn` };
     if (new Set(attempts).size !== attempts.length) return { ok: false, error: `Câu ${i + 1} có lần chọn trùng` };
-    if (!attempts.every((a) => q.options.includes(a))) {
+    if (!attempts.every((a) => isAllowedAnswer(q, a))) {
       return { ok: false, error: `Câu ${i + 1} có đáp án không thuộc phương án` };
     }
     if (attempts[attempts.length - 1] !== q.correctAnswer) {

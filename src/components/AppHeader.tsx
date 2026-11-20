@@ -6,7 +6,8 @@ import { AudioController } from '../features/audio/AudioController';
 import { Mascot } from './Mascot';
 import { HoldButton, ProgressBar } from './ui';
 
-export function AppHeader({ progress, candies }: { progress: number; candies: number }) {
+/** `coins` có giá trị (nhóm 5–9 tuổi) => hiện xu thay cho kẹo. */
+export function AppHeader({ progress, candies, coins }: { progress: number; candies: number; coins?: number | undefined }) {
   const { soundEnabled, setSoundEnabled } = useSettings();
   const navigate = useNavigate();
   return (
@@ -33,10 +34,19 @@ export function AppHeader({ progress, candies }: { progress: number; candies: nu
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={`${candies} viên kẹo`}>
-          <img src="/assets/rewards/candy.svg" alt="" className="h-10 w-10" />
-          {candies}
-        </span>
+        {coins !== undefined ? (
+          <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={`${coins} xu`} data-testid="header-coins">
+            <span className="text-3xl" aria-hidden>
+              🪙
+            </span>
+            {coins}
+          </span>
+        ) : (
+          <span className="flex h-16 items-center gap-1 rounded-3xl bg-sunny-100 px-3 text-2xl font-extrabold" aria-label={`${candies} viên kẹo`}>
+            <img src="/assets/rewards/candy.svg" alt="" className="h-10 w-10" />
+            {candies}
+          </span>
+        )}
         <button
           type="button"
           className="flex h-16 w-16 items-center justify-center rounded-3xl bg-sky-100 text-sky-500"

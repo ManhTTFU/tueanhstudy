@@ -68,8 +68,9 @@ export const settingsSchema = z
   .object({
     soundEnabled: z.boolean().optional(),
     reducedMotion: z.boolean().optional(),
+    ageGroup: z.enum(['preschool', 'primary']).optional(),
   })
-  .refine((v) => v.soundEnabled !== undefined || v.reducedMotion !== undefined, 'Không có thay đổi');
+  .refine((v) => v.soundEnabled !== undefined || v.reducedMotion !== undefined || v.ageGroup !== undefined, 'Không có thay đổi');
 
 export const resetSchema = z.object({ confirm: z.literal('XOA') });
 
@@ -80,3 +81,15 @@ export const historyQuerySchema = z.object({
 });
 
 export const uuidSchema = z.uuid();
+
+// ---------- Nhóm 5–9 tuổi ----------
+export const challengeCompleteSchema = z.object({
+  answers: z
+    .array(z.object({ questionId: z.string().min(1).max(16), value: z.number().int().min(0).max(99_999) }))
+    .max(200),
+});
+export const redeemSchema = z.object({ redemptionId: z.uuid(), rewardId: z.uuid() });
+export const shopRewardSchema = z.object({
+  name: z.string().trim().min(1, 'Hãy nhập tên món quà').max(60),
+  cost: z.number().int().min(1).max(100_000),
+});

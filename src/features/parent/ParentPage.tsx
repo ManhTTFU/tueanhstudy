@@ -2,17 +2,17 @@
  * Khu vực phụ huynh: thống kê, lịch sử (phân trang), cài đặt, quản lý dữ liệu.
  * Truy cập trực tiếp bằng URL vẫn phải qua cổng PIN; API kiểm tra quyền tại backend.
  */
-import { BarChart3, ChevronLeft, ChevronRight, Database, Download, History, LogOut, Settings, Trash2, Upload, X } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, Database, Download, Gift, History, LogOut, Settings, Trash2, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSettings } from '../../app/SettingsContext';
 import { getEnabledChapters } from '../../chapters/registry';
 import { BackButton, LoadingMascotDots, PageShell } from '../../components/ui';
 import { getSticker, stickerImage } from '../../data/stickers';
-import { api, ApiClientError, type HistoryPage, type ParentStats, type SessionDetail, type StickerCount } from '../../services/api';
+import { api, ApiClientError, type HistoryPage, type ParentStats, type SessionDetail, type ShopView, type StickerCount } from '../../services/api';
 import { formatDateTime } from '../../utils/storage';
 import { ParentGate } from './ParentGate';
 
-type Tab = 'stats' | 'history' | 'settings' | 'data';
+type Tab = 'stats' | 'history' | 'settings' | 'data' | 'gifts';
 
 export function ParentPage() {
   const [session, setSession] = useState<{ pinConfigured: boolean; authenticated: boolean } | null>(null);
@@ -54,6 +54,7 @@ function ParentDashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: 'stats', label: 'Thống kê', icon: <BarChart3 size={20} /> },
     { id: 'history', label: 'Lịch sử', icon: <History size={20} /> },
+    { id: 'gifts', label: 'Đổi quà', icon: <Gift size={20} /> },
     { id: 'settings', label: 'Cài đặt', icon: <Settings size={20} /> },
     { id: 'data', label: 'Dữ liệu', icon: <Database size={20} /> },
   ];
@@ -94,6 +95,7 @@ function ParentDashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
       </nav>
       {tab === 'stats' && <StatsTab guard={guard} />}
       {tab === 'history' && <HistoryTab guard={guard} />}
+      {tab === 'gifts' && <GiftsTab guard={guard} />}
       {tab === 'settings' && <SettingsTab guard={guard} />}
       {tab === 'data' && <DataTab guard={guard} />}
     </div>
@@ -339,6 +341,119 @@ function SettingsTab({ guard }: { guard: Guard }) {
 }
 
 /** Gia đình: tên, mã gia đình (đăng nhập trên máy mới), đăng xuất các máy. */
+const GIFT_SUGGESTIONS = [
+  { name: 'Thêm 15 phút xem hoạt hình', cost: 60 },
+  { name: 'Được chọn món ăn tối', cost: 100 },
+  { name: 'Đi ăn kem cùng bố mẹ', cost: 150 },
+];
+
+/** Quà thật đổi bằng xu (nhóm 5–9 tuổi): bố mẹ đặt quà, bé đổi, bố mẹ đánh dấu đã trao. */
+function GiftsTab({ guard }: { guard: Guard }) {
+  const [shop, setShop] = useState<ShopView | null>(null);
+  const [name, setName] = useState('');
+  const [cost, setCost] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    guard(api.shop)
+      .then(setShop)
+      .catch(() => undefined);
+  }, [guard]);
+
+  const run = async (fn: () => Promise<ShopView>, okText?: string) => {
+    setMsg(null);
+    try {
+      setShop(await guard(fn));
+      if (okText) setMsg({ ok: true, text: okText });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Có lỗi xảy ra' });
+    }
+  };
+
+  const add = (n: string, c: number) => {
+    if (!n.trim()) return setMsg({ ok: false, text: 'Hãy nhập tên món quà.' });
+    if (!Number.isInteger(c) || c < 1) return setMsg({ ok: false, text: 'Giá quà là số xu lớn hơn 0.' });
+    void run(() => api.addShopReward(n.trim(), c), `Đã thêm "${n.trim()}".`).then(() => {
+      setName('');
+      setCost('');
+    });
+  };
+
+  return (
+    <>
+      <Panel title="Quà đổi bằng xu (bé 5–9 tuổi)">
+        <p className="mb-3 text-ink/70">
+          Bé kiếm xu khi làm bài nhóm 5–9 tuổi: đúng ngay lần đầu <b>2 xu</b>, đúng sau khi thử lại <b>1 xu</b>; Thử thách 60 giây: 2 câu đúng = 1 xu.
+          {shop && (
+            <>
+              {' '}
+              Hiện bé có <b data-testid="parent-coins">{shop.coins.balance} xu</b> (đã kiếm {shop.coins.earned}, đã đổi {shop.coins.spent}).
+            </>
+          )}
+        </p>
+        <ul className="mb-4 flex flex-col gap-2" data-testid="parent-gift-list">
+          {shop?.rewards.map((r) => (
+            <li key={r.id} className="flex items-center justify-between gap-2 rounded-2xl bg-cream px-4 py-2">
+              <span className="font-bold">
+                {r.name} · <span className="text-ink/60">{r.cost} xu</span>
+              </span>
+              <button type="button" className="rounded-xl bg-white px-3 py-1 font-bold text-bubblegum-500 shadow-pop-sm" onClick={() => void run(() => api.removeShopReward(r.id))}>
+                Bỏ
+              </button>
+            </li>
+          ))}
+          {shop && shop.rewards.length === 0 && <li className="text-ink/50">Chưa có món quà nào.</li>}
+        </ul>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input className="parent-input flex-1" placeholder="Tên quà, vd. Đi công viên" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} data-testid="gift-name" />
+          <input
+            className="parent-input sm:w-32"
+            inputMode="numeric"
+            placeholder="Số xu"
+            value={cost}
+            onChange={(e) => setCost(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            data-testid="gift-cost"
+          />
+          <button type="button" className="rounded-2xl bg-grape-500 px-4 py-3 font-bold text-white" onClick={() => add(name, Number(cost))} data-testid="gift-add">
+            Thêm quà
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {GIFT_SUGGESTIONS.map((g) => (
+            <button key={g.name} type="button" className="rounded-full bg-sunny-100 px-3 py-1 text-sm font-bold" onClick={() => add(g.name, g.cost)}>
+              + {g.name} ({g.cost} xu)
+            </button>
+          ))}
+        </div>
+        {msg && <p className={`mt-3 font-semibold ${msg.ok ? 'text-mint-500' : 'text-bubblegum-500'}`}>{msg.text}</p>}
+      </Panel>
+
+      <Panel title="Bé đã đổi">
+        {shop && shop.redemptions.length === 0 && <p className="text-ink/50">Bé chưa đổi quà nào.</p>}
+        <ul className="flex flex-col gap-2">
+          {shop?.redemptions.map((r) => (
+            <li key={r.id} className="flex items-center justify-between gap-2 rounded-2xl bg-cream px-4 py-2">
+              <span className="flex flex-col">
+                <span className="font-bold">{r.name}</span>
+                <span className="text-sm text-ink/50">
+                  {formatDateTime(r.redeemedAt)} · {r.cost} xu
+                </span>
+              </span>
+              {r.deliveredAt ? (
+                <span className="font-bold text-mint-500">Đã trao</span>
+              ) : (
+                <button type="button" className="rounded-xl bg-mint-400 px-3 py-2 font-bold text-white" onClick={() => void run(() => api.markDelivered(r.id))} data-testid="gift-deliver">
+                  Đã trao quà
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    </>
+  );
+}
+
 function FamilyPanel({ guard }: { guard: Guard }) {
   const [name, setName] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
@@ -500,7 +615,7 @@ function DataTab({ guard }: { guard: Guard }) {
       const r = await guard(() => api.importBackup(pending.data));
       setMsg({ ok: true, text: `Đã khôi phục ${r.imported.sessions} bài học và ${r.imported.rewards} phần thưởng.` });
       const s = await api.settings();
-      settings.applyServerSettings({ soundEnabled: s.soundEnabled, reducedMotion: s.reducedMotion });
+      settings.applyServerSettings({ soundEnabled: s.soundEnabled, reducedMotion: s.reducedMotion, ageGroup: s.ageGroup });
     } catch (e) {
       const details = e instanceof ApiClientError && Array.isArray(e.details) ? ` (${(e.details as { path: string; message: string }[]).map((d) => `${d.path}: ${d.message}`).join('; ')})` : '';
       setMsg({ ok: false, text: `${(e as Error).message}${details}` });

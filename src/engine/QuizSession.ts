@@ -5,6 +5,7 @@
  *  answering --(chọn đúng)--> correct --(next)--> answering (câu sau) | finished
  *  answering --(chọn sai)---> wrong   --(retry)-> answering (cùng câu)
  */
+import { isAllowedAnswer, MAX_INPUT_ATTEMPTS } from './QuizEngine.js';
 import type { AnswerRecord, AnswerValue, Question } from './types.js';
 
 export type QuizPhase = 'answering' | 'correct' | 'wrong' | 'finished';
@@ -71,8 +72,9 @@ export function answerQuestion(state: QuizSessionState, value: AnswerValue): Qui
   const question = getCurrentQuestion(state);
   const record = getCurrentRecord(state);
   if (!question || !record) return state;
-  if (!question.options.includes(value)) return state;
+  if (!isAllowedAnswer(question, value)) return state;
   if (record.attempts.includes(value)) return state;
+  if (question.input && record.attempts.length >= MAX_INPUT_ATTEMPTS - 1 && value !== question.correctAnswer) return state;
 
   const correct = value === question.correctAnswer;
   const updated: AnswerRecord = {

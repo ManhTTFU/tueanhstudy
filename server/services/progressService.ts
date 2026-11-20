@@ -1,7 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { chapterProgress, progress, rewards, type ChapterProgressRow, type ProgressRow } from '../../db/schema.js';
 import { isChapterIdUnlocked } from '../../src/chapters/levels.js';
-import { getEnabledChapters } from '../../src/chapters/registry.js';
+import { chapterAgeGroup, getEnabledChapters } from '../../src/chapters/registry.js';
 import { candiesUntilNextGift, giftsAvailable } from '../../src/engine/RewardService.js';
 import type { Database } from '../db.js';
 import { getPublicSettings, type PublicSettings } from './settingsService.js';
@@ -102,8 +102,13 @@ export async function getSummary(db: Database, familyId: string): Promise<Summar
   // Tiến độ tổng chỉ tính các trò ĐÃ MỞ KHOÁ: mở cấp mới thì mẫu số tăng dần,
   // bé không bị "tụt" tiến độ vì những cấp chưa chơi tới.
   const bestScoreOf = (id: string) => chapterRows.find((r) => r.chapterId === id)?.bestScore ?? 0;
-  const hubs = new Set(getEnabledChapters().filter((c) => c.hubOnly).map((c) => c.id));
-  const counted = chapters.filter((c) => !hubs.has(c.chapterId) && isChapterIdUnlocked(c.chapterId, bestScoreOf));
+  // ...và chỉ tính các chương thuộc nhóm tuổi đang chọn ở trang chủ.
+  const countable = new Set(
+    getEnabledChapters()
+      .filter((c) => !c.hubOnly && !c.review && chapterAgeGroup(c) === settings.ageGroup)
+      .map((c) => c.id),
+  );
+  const counted = chapters.filter((c) => countable.has(c.chapterId) && isChapterIdUnlocked(c.chapterId, bestScoreOf));
   const maxStars = counted.length * 3;
   const stars = counted.reduce((s, c) => s + c.stars, 0);
   return {

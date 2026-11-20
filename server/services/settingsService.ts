@@ -1,11 +1,14 @@
 import { eq, sql } from 'drizzle-orm';
 import { appSettings, families, type AppSettingsRow, type FamilyRow } from '../../db/schema.js';
+import { AGE_GROUPS, type AgeGroup } from '../../src/engine/types.js';
 import type { Database } from '../db.js';
 import { notFound } from '../errors.js';
 
 export interface PublicSettings {
   soundEnabled: boolean;
   reducedMotion: boolean;
+  /** Nhóm tuổi đang chọn ở trang chủ. */
+  ageGroup: AgeGroup;
   pinConfigured: boolean;
   familyName: string;
 }
@@ -31,6 +34,7 @@ export function toPublicSettings(row: FamilyRow): PublicSettings {
   return {
     soundEnabled: row.soundEnabled,
     reducedMotion: row.reducedMotion,
+    ageGroup: (AGE_GROUPS as readonly string[]).includes(row.ageGroup) ? (row.ageGroup as AgeGroup) : 'preschool',
     pinConfigured: row.pinHash !== null,
     familyName: row.name,
   };
@@ -43,11 +47,12 @@ export async function getPublicSettings(db: Database, familyId: string): Promise
 export async function updateSettings(
   db: Database,
   familyId: string,
-  patch: { soundEnabled?: boolean | undefined; reducedMotion?: boolean | undefined },
+  patch: { soundEnabled?: boolean | undefined; reducedMotion?: boolean | undefined; ageGroup?: AgeGroup | undefined },
 ): Promise<PublicSettings> {
   const values: Partial<FamilyRow> = { updatedAt: new Date() };
   if (patch.soundEnabled !== undefined) values.soundEnabled = patch.soundEnabled;
   if (patch.reducedMotion !== undefined) values.reducedMotion = patch.reducedMotion;
+  if (patch.ageGroup !== undefined) values.ageGroup = patch.ageGroup;
   const [row] = await db.update(families).set(values).where(eq(families.id, familyId)).returning();
   if (!row) throw notFound('Không tìm thấy gia đình');
   return toPublicSettings(row);

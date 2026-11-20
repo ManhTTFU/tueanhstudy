@@ -2,7 +2,7 @@
  * API client cho frontend. Không chứa bất kỳ thông tin kết nối database nào –
  * chỉ gọi REST API cùng domain (/api/...).
  */
-import type { Question, RewardGrant } from '../engine/types';
+import type { AgeGroup, Question, RewardGrant } from '../engine/types';
 
 export class ApiClientError extends Error {
   constructor(
@@ -52,6 +52,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export interface PublicSettings {
   soundEnabled: boolean;
   reducedMotion: boolean;
+  ageGroup: AgeGroup;
   pinConfigured: boolean;
   familyName: string;
 }
@@ -122,6 +123,8 @@ export interface CompletedSession {
   completedAt: string;
   encouragement: string;
   candiesEarned: number;
+  /** Xu kiếm được (nhóm 5–9 tuổi). */
+  coinsEarned?: number;
   rewards: RewardGrant[];
   alreadyCompleted: boolean;
   totals: { totalCandies: number; giftsAvailable: number };
@@ -197,11 +200,64 @@ export interface ParentStats {
   chapters: (ChapterSummary & { name: string; accuracy: number })[];
 }
 
+// ---------- Nhóm 5–9 tuổi ----------
+export interface CoinBalance {
+  earned: number;
+  spent: number;
+  balance: number;
+}
+
+export interface PrimaryOverview {
+  coins: CoinBalance;
+  reviewCount: number;
+  challengeBest: number;
+  weekRank: number;
+  weekCoins: number;
+  families: number;
+}
+
+export interface LeaderboardRow {
+  rank: number;
+  name: string;
+  coins: number;
+  me: boolean;
+}
+
+export interface Leaderboard {
+  weekStart: string;
+  weekEnd: string;
+  week: LeaderboardRow[];
+  allTime: LeaderboardRow[];
+}
+
+export interface ShopView {
+  coins: CoinBalance;
+  rewards: { id: string; name: string; cost: number }[];
+  redemptions: { id: string; name: string; cost: number; redeemedAt: string; deliveredAt: string | null }[];
+}
+
+export interface StartedChallenge {
+  runId: string;
+  durationMs: number;
+  questions: { id: string; text: string; answer: number }[];
+  best: number;
+}
+
+export interface ChallengeResult {
+  runId: string;
+  correct: number;
+  wrong: number;
+  coinsEarned: number;
+  best: number;
+  isRecord: boolean;
+  alreadyCompleted: boolean;
+}
+
 // ---------- Endpoints ----------
 export const api = {
   summary: () => request<Summary>('GET', 'summary'),
   settings: () => request<PublicSettings>('GET', 'settings'),
-  updateSettings: (patch: Partial<Pick<PublicSettings, 'soundEnabled' | 'reducedMotion'>>) =>
+  updateSettings: (patch: Partial<Pick<PublicSettings, 'soundEnabled' | 'reducedMotion' | 'ageGroup'>>) =>
     request<PublicSettings>('PUT', 'settings', patch),
 
   startQuiz: (chapterId: string) => request<StartedSession>('POST', 'quiz/sessions', { chapterId }),
@@ -233,6 +289,17 @@ export const api = {
       `history?page=${page}&pageSize=${pageSize}${chapterId ? `&chapterId=${encodeURIComponent(chapterId)}` : ''}`,
     ),
   historyDetail: (id: string) => request<SessionDetail>('GET', `history/${encodeURIComponent(id)}`),
+
+  primaryOverview: () => request<PrimaryOverview>('GET', 'primary/overview'),
+  leaderboard: () => request<Leaderboard>('GET', 'leaderboard'),
+  startChallenge: () => request<StartedChallenge>('POST', 'challenge'),
+  completeChallenge: (runId: string, answers: { questionId: string; value: number }[]) =>
+    request<ChallengeResult>('POST', `challenge/${encodeURIComponent(runId)}/complete`, { answers }),
+  shop: () => request<ShopView>('GET', 'shop'),
+  redeem: (rewardId: string, redemptionId: string) => request<ShopView>('POST', 'shop/redeem', { rewardId, redemptionId }),
+  addShopReward: (name: string, cost: number) => request<ShopView>('POST', 'shop/rewards', { name, cost }),
+  removeShopReward: (id: string) => request<ShopView>('POST', `shop/rewards/${encodeURIComponent(id)}/remove`),
+  markDelivered: (id: string) => request<ShopView>('POST', `shop/redemptions/${encodeURIComponent(id)}/deliver`),
 
   exportBackup: () => request<Record<string, unknown>>('GET', 'backup/export'),
   importBackup: (backup: unknown) =>

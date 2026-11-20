@@ -16,13 +16,15 @@ import {
   type StoredQuestion,
 } from '../../db/schema.js';
 import { isChapterUnlocked, LEVEL_UNLOCK_MIN_SCORE, unlockRequirements } from '../../src/chapters/levels.js';
-import { getChapter } from '../../src/chapters/registry.js';
+import { coinsForAnswers } from '../../src/chapters/primary/rewards.js';
+import { chapterAgeGroup, getChapter } from '../../src/chapters/registry.js';
 import { encouragementFor } from '../../src/engine/messages.js';
 import { evaluateSubmission, generateQuiz, type SubmittedAnswer } from '../../src/engine/QuizEngine.js';
 import { computeSessionRewards, giftsAvailable } from '../../src/engine/RewardService.js';
 import type { Question, RewardGrant, Rng } from '../../src/engine/types.js';
 import type { Database } from '../db.js';
 import { ApiError, forbidden, notFound, tooManyRequests, unprocessable } from '../errors.js';
+import { earnCoins, pickReviewQuestions, updateReviewItems } from './primaryService.js';
 import { ensureProgressRow } from './progressService.js';
 
 /** Số phiên được mở tối đa trong 10 phút (chống gửi yêu cầu liên tục, bền vững trong DB). */
@@ -78,7 +80,8 @@ export async function startSession(
       ),
     );
 
-  const questions = generateQuiz(chapter, rng) as Question[];
+  // Bài ôn: lấy từ danh sách câu sai của gia đình (409 review_empty khi chưa có câu nào).
+  const questions = chapter.review ? ((await pickReviewQuestions(db, familyId, rng)) as Question[]) : (generateQuiz(chapter, rng) as Question[]);
   const [row] = await db
     .insert(quizSessions)
     .values({
@@ -107,6 +110,8 @@ export interface CompletedSessionResult {
   completedAt: string;
   encouragement: string;
   candiesEarned: number;
+  /** Xu kiếm được (nhóm 5–9 tuổi; 0 với nhóm 3–5 tuổi). */
+  coinsEarned: number;
   rewards: RewardGrant[];
   alreadyCompleted: boolean;
   totals: { totalCandies: number; giftsAvailable: number };
@@ -167,7 +172,8 @@ export async function completeSession(
         and(eq(quizSessions.familyId, familyId), eq(quizSessions.status, 'completed'), eq(quizSessions.isPerfectScore, true)),
       );
 
-    const grants = computeSessionRewards({
+    // Nhóm 5–9 tuổi thưởng bằng xu (bên dưới), không có kẹo / sticker / thành tích.
+    const grants = chapterAgeGroup(chapter) === 'primary' ? [] : computeSessionRewards({
       sessionId,
       chapterId: chapter.id,
       chapterRewards: chapter.rewards,
@@ -194,6 +200,13 @@ export async function completeSession(
           .onConflictDoNothing({ target: [rewards.familyId, rewards.dedupeKey] })
           .returning({ dedupeKey: rewards.dedupeKey })
       : [];
+    // Nhóm 5–9 tuổi: cộng xu + cập nhật danh sách câu sai để ôn.
+    let coinsEarned = 0;
+    if (chapterAgeGroup(chapter) === 'primary') {
+      coinsEarned = await earnCoins(tx, familyId, coinsForAnswers(evaluation.answers), 'session', `session:${sessionId}:coin`, now);
+      await updateReviewItems(tx, familyId, chapter.id, Boolean(chapter.review), session.questions, evaluation.answers, now);
+    }
+
     const insertedKeys = new Set(inserted.map((r) => r.dedupeKey));
     const newGrants = grants.filter((g) => insertedKeys.has(g.dedupeKey));
     const candiesEarned = newGrants.filter((g) => g.rewardType === 'candy').reduce((s, g) => s + g.quantity, 0);
@@ -257,6 +270,7 @@ export async function completeSession(
       completedAt: now.toISOString(),
       encouragement: encouragementFor(score.score),
       candiesEarned,
+      coinsEarned,
       rewards: newGrants,
       alreadyCompleted: false,
       totals: {
@@ -282,6 +296,7 @@ async function buildExistingResult(db: Database, session: QuizSessionRow): Promi
     completedAt: (session.completedAt ?? new Date()).toISOString(),
     encouragement: encouragementFor(session.score),
     candiesEarned: session.candiesEarned,
+    coinsEarned: 0,
     rewards: [],
     alreadyCompleted: true,
     totals: { totalCandies: p.totalCandies, giftsAvailable: giftsAvailable(p.totalCandies, p.giftsOpened) },

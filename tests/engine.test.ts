@@ -5,6 +5,8 @@ import { dadaChapters, TOPICS } from '../src/chapters/dada/config';
 import { speechFile, speechOf, type DadaPayload, type Visual } from '../src/chapters/dada/kit';
 import { mazePath } from '../src/chapters/dada/topics/maze';
 import { arithmeticSpeech, arithmeticVoiceFile, OPERATIONS } from '../src/chapters/arithmetic/operations';
+import { primaryChapters } from '../src/chapters/primary/config';
+import { PRIMARY_TOPICS } from '../src/chapters/primary/topics';
 import { CHAPTERS, getChapter, getHomeChapters, getHubChapters, getSubGames } from '../src/chapters/registry';
 import { numberRecognitionChapter } from '../src/chapters/number-recognition/config';
 import { objectCountingChapter } from '../src/chapters/object-counting/config';
@@ -50,8 +52,12 @@ function play(state: QuizSessionState, wrongFirst: number): QuizSessionState {
 describe('Hệ thống đăng ký chương', () => {
   it('các chương được bật, đúng mã chương; trang chủ chỉ hiện 2 chương gốc', () => {
     const levelIds = Array.from({ length: 9 }, (_, i) => [`number-recognition-${i * 10 + 11}-${i * 10 + 20}`, `number-finding-${i * 10 + 11}-${i * 10 + 20}`]).flat();
-    expect(CHAPTERS.filter((c) => c.enabled).map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'number-finding', ...levelIds, 'arithmetic', 'arithmetic-sub-5', 'arithmetic-add-10', 'arithmetic-sub-10', 'brain', ...dadaChapters.map((c) => c.id)]);
+    expect(CHAPTERS.filter((c) => c.enabled).map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'number-finding', ...levelIds, 'arithmetic', 'arithmetic-sub-5', 'arithmetic-add-10', 'arithmetic-sub-10', 'brain', ...dadaChapters.map((c) => c.id), ...primaryChapters.map((c) => c.id)]);
     expect(getHomeChapters().map((c) => c.id)).toEqual(['number-recognition', 'object-counting', 'arithmetic', 'brain']);
+    expect(getHomeChapters('preschool')).toEqual(getHomeChapters());
+    // Nhóm 5–9 tuổi: Tính nhẩm + cửa vào Tư duy toán (7 chủ đề bên trong)
+    expect(getHomeChapters('primary').map((c) => c.id)).toEqual(['pm-mental', 'pm-think']);
+    expect(getHubChapters('pm-think').map((c) => c.id)).toEqual(PRIMARY_TOPICS.map((t) => `pm-${t.id}`));
     // 11 chủ đề tư duy nằm trong trang "Sân chơi trí tuệ"
     expect(getHubChapters('brain').map((c) => c.id)).toEqual(TOPICS.map((t) => `dd-${t.id}`));
     expect(getSubGames('number-recognition').map((c) => c.id)).toEqual(['number-finding', ...levelIds]);

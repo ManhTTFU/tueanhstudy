@@ -1,0 +1,1 @@
+ALTER TABLE "families" ADD COLUMN "age_group" text DEFAULT 'preschool' NOT NULL;

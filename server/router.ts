@@ -38,11 +38,22 @@ import {
 import { checkRateLimit, type RateLimitName } from './rateLimit.js';
 import { exportBackup, importBackup, resetAllData } from './services/backupService.js';
 import { getHistory, getParentStats, getSessionDetail } from './services/historyService.js';
+import { completeChallenge, startChallenge } from './services/challengeService.js';
+import {
+  addShopReward,
+  getLeaderboard,
+  getPrimaryOverview,
+  getShop,
+  markDelivered,
+  redeemReward,
+  removeShopReward,
+} from './services/primaryService.js';
 import { getSummary, markLearned } from './services/progressService.js';
 import { completeSession, startSession } from './services/quizService.js';
 import { getRewardsOverview, openGift } from './services/rewardService.js';
 import { bumpSessionVersion, getFamilyRow, getPublicSettings, updateSettings } from './services/settingsService.js';
 import {
+  challengeCompleteSchema,
   changePinSchema,
   completeQuizSchema,
   familyLoginSchema,
@@ -52,11 +63,13 @@ import {
   loginSchema,
   openGiftSchema,
   parseBody,
+  redeemSchema,
   renameFamilySchema,
   resetSchema,
   setFamilyCodeSchema,
   settingsSchema,
   setupPinSchema,
+  shopRewardSchema,
   startQuizSchema,
   uuidSchema,
 } from './validation.js';
@@ -274,6 +287,54 @@ const routes: Route[] = [
       const { giftId } = parseBody(openGiftSchema, req.body);
       return ok(await openGift(db, familyId, giftId));
     },
+  },
+
+  // ---------- Nhóm 5–9 tuổi: xu, thử thách, đổi quà, bảng xếp hạng ----------
+  { method: 'GET', pattern: /^primary\/overview$/, handler: async ({ db, familyId }) => ok(await getPrimaryOverview(db, familyId)) },
+  { method: 'GET', pattern: /^leaderboard$/, handler: async ({ db, familyId }) => ok(await getLeaderboard(db, familyId)) },
+  {
+    method: 'POST',
+    pattern: /^challenge$/,
+    limit: 'write',
+    handler: async ({ db, familyId }) => ok(await startChallenge(db, familyId)),
+  },
+  {
+    method: 'POST',
+    pattern: /^challenge\/([^/]+)\/complete$/,
+    limit: 'write',
+    handler: async ({ db, req, params, familyId }) => {
+      const runId = parseUuid(params[0]);
+      const { answers } = parseBody(challengeCompleteSchema, req.body);
+      return ok(await completeChallenge(db, familyId, runId, answers));
+    },
+  },
+  { method: 'GET', pattern: /^shop$/, handler: async ({ db, familyId }) => ok(await getShop(db, familyId)) },
+  {
+    method: 'POST',
+    pattern: /^shop\/redeem$/,
+    limit: 'write',
+    handler: async ({ db, req, familyId }) => ok(await redeemReward(db, familyId, parseBody(redeemSchema, req.body))),
+  },
+  {
+    method: 'POST',
+    pattern: /^shop\/rewards$/,
+    parent: true,
+    limit: 'write',
+    handler: async ({ db, req, familyId }) => ok(await addShopReward(db, familyId, parseBody(shopRewardSchema, req.body))),
+  },
+  {
+    method: 'POST',
+    pattern: /^shop\/rewards\/([^/]+)\/remove$/,
+    parent: true,
+    limit: 'write',
+    handler: async ({ db, params, familyId }) => ok(await removeShopReward(db, familyId, parseUuid(params[0]))),
+  },
+  {
+    method: 'POST',
+    pattern: /^shop\/redemptions\/([^/]+)\/deliver$/,
+    parent: true,
+    limit: 'write',
+    handler: async ({ db, params, familyId }) => ok(await markDelivered(db, familyId, parseUuid(params[0]))),
   },
 
   // ---------- Cài đặt ----------
