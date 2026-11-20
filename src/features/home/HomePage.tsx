@@ -11,6 +11,7 @@ import { getHomeChapters } from '../../chapters/registry';
 import type { AgeGroup } from '../../engine/types';
 import { getChapterUI } from '../../chapters/ui-registry';
 import { AppHeader } from '../../components/AppHeader';
+import { InstallHint } from '../../components/InstallHint';
 import { PageShell, ProgressBar, Stars } from '../../components/ui';
 import { getSticker, stickerImage, STICKERS } from '../../data/stickers';
 import { useApiData } from '../../hooks/useApiData';
@@ -39,6 +40,8 @@ export function HomePage() {
           Chưa kết nối được máy chủ – bé vẫn chơi được nhưng kết quả chưa được lưu.
         </p>
       )}
+
+      <InstallHint />
 
       <AgeSwitch
         value={ageGroup}

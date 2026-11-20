@@ -67,6 +67,9 @@ Tests use in-memory PGlite with all migrations applied, so they never touch Neon
 ### Backup format
 `server/services/backupService.ts` defines the format: `format: "be-vui-hoc-toan-backup"` plus `schemaVersion`. Import validates with Zod plus cross-checks (referential integrity, candy total = sum of candy rewards, gift count) and then replaces all learning tables in one transaction. PIN and secret are never exported or overwritten. If you change the shape, bump `BACKUP_SCHEMA_VERSION` and add a conversion step in `upgradeBackup()`.
 
+### PWA
+`public/manifest.webmanifest`, iOS meta tags + `apple-touch-icon` in `index.html`, icons in `public/icons/`, and a hand-written `public/sw.js` registered in `src/main.tsx` only when `import.meta.env.PROD`. The SW serves navigations network-first (offline fallback to cached `/`), `/static/` cache-first, `/assets/` + `/icons/` stale-while-revalidate, and never touches `/api/`, `/assets/sounds/` or Range requests. Bump `VERSION` in `sw.js` to drop old caches. `vercel.json` serves `sw.js`/manifest with `no-cache`. `PageShell` uses `.page-safe` (index.css) for safe-area insets; `InstallHint` (home) shows iOS "Thêm vào MH chính" steps or the `beforeinstallprompt` button.
+
 ### Assets
 - Everything lives under `public/assets/` (served at `/assets/...`, while hashed build output goes to `/static/`).
 - Object images: `images/objects/<id>.svg`, keyed by `OBJECTS` in `src/data/objects/catalog.ts`. The `source` field is the fluentui-emoji folder name.

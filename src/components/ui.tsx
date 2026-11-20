@@ -56,7 +56,8 @@ export function BackButton({ to = '/', label = 'Quay lại' }: { to?: string; la
 
 export function PageShell({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`bg-playful min-h-screen overflow-x-hidden min-h-[100dvh] px-4 pb-10 pt-4 sm:px-6 ${className}`}>
+    // page-safe: chừa vùng tai thỏ / thanh home khi mở như ứng dụng trên iPhone, iPad (index.css).
+    <div className={`page-safe bg-playful min-h-screen overflow-x-hidden min-h-[100dvh] ${className}`}>
       <div className="mx-auto w-full max-w-5xl">{children}</div>
     </div>
   );

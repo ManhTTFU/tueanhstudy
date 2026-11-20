@@ -36,6 +36,19 @@
 }
 
 @layer components {
+  /* Khung trang: chừa vùng tai thỏ / thanh home khi mở như ứng dụng (PWA, viewport-fit=cover). */
+  .page-safe {
+    padding-top: max(1rem, env(safe-area-inset-top));
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom));
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+  @media (min-width: 640px) {
+    .page-safe {
+      padding-left: max(1.5rem, env(safe-area-inset-left));
+      padding-right: max(1.5rem, env(safe-area-inset-right));
+    }
+  }
   /* Nút lớn cho bé – vùng chạm tối thiểu 64px */
   .kid-btn {
     @apply inline-flex min-h-[64px] min-w-[64px] items-center justify-center gap-2 rounded-3xl px-6 text-2xl font-extrabold shadow-pop transition-transform active:translate-y-1 active:shadow-pop-sm disabled:opacity-50;

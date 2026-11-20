@@ -1,12 +1,21 @@
 {
+  "id": "/",
   "name": "Bé Vui Học Toán",
   "short_name": "Bé Học Toán",
-  "description": "Học mà chơi – Chơi mà học",
+  "description": "Học mà chơi – Chơi mà học. Toán cho bé 3–9 tuổi.",
   "lang": "vi",
+  "dir": "ltr",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#FFF8EC",
-  "theme_color": "#FFD23F",
-  "icons": [{ "src": "/assets/mascot/mochi.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "theme_color": "#FFF8EC",
+  "categories": ["education", "kids"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/mascot/mochi.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
 }

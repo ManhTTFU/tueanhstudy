@@ -367,6 +367,13 @@ Không cần sửa `QuizPage`, `useQuiz`, chấm điểm, phần thưởng, API 
 
 Phép cộng/trừ: payload kiểu `{ a, b, op }`, `correctAnswer = a ± b`, `QuestionView` hiển thị hình minh họa hai nhóm – vẫn dùng `generateNumericOptions` và toàn bộ bộ máy hiện có. `CountingGrid` đã hỗ trợ số lượng > 10.
 
+### Cài lên iPhone / iPad (PWA)
+
+- Mở https://tueanhstudy.vercel.app/ bằng **Safari** → nút **Chia sẻ** → **Thêm vào MH chính**. Ứng dụng mở toàn màn hình với biểu tượng Mochi (trang chủ cũng có lời nhắc này; Android/Chrome có nút "Cài ứng dụng").
+- Ứng dụng cài trên iPhone/iPad có bộ nhớ riêng với Safari ⇒ lần đầu mở cần **đăng nhập gia đình lại** (tên + mã gia đình).
+- `public/sw.js` (chỉ đăng ký ở bản build): trang mở được khi mất mạng; JS/CSS (`/static/`) và hình (`/assets/`) được lưu đệm; **không** lưu `/api/` và âm thanh. Muốn xoá bộ nhớ đệm cũ của mọi máy: tăng `VERSION` trong `sw.js`.
+- Biểu tượng: `public/icons/` (180 cho iOS, 192/512 và 512 maskable cho Android), khai báo trong `public/manifest.webmanifest` và `index.html`.
+
 ## 12. Thêm hình minh họa / âm thanh
 
 **Hình đếm** (`src/data/objects/catalog.ts`):

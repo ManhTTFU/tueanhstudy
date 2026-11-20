@@ -90,6 +90,7 @@ export function FeedbackBubble({ phase, praise, tryAgain = TRY_AGAIN_MESSAGE }: 
           exit={{ opacity: 0, y: 30, scale: 0.9 }}
           transition={{ type: 'spring', stiffness: 300, damping: 22 }}
           className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
+          style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}
           role="status"
           aria-live="polite"
           data-testid={correct ? 'feedback-correct' : 'feedback-wrong'}
